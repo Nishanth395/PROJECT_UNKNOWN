@@ -9,32 +9,117 @@ This directory contains the complete database schema, spatial indexing setup, an
 ```text
 database/
 ├── schema.sql      # DDL table definitions, enums, triggers, PostGIS indexes, and RLS policies
-├── seed.sql        # Realistic fictional development seed data (skills, workers, worker_skills)
-└── README.md       # Database architecture, spatial query examples, and setup instructions
+├── seed.sql        # Realistic development seed data (10 workers, 14 skills, worker-skill mappings)
+└── README.md       # Database architecture, table descriptions, constraints, and setup instructions
 ```
 
 ---
 
-## 🏛️ Database Entities & Relationships
+## 🏛️ Database Tables & Important Constraints
 
-| Entity | Primary Key | Foreign Keys | Key Columns |
-| :--- | :--- | :--- | :--- |
-| **`users`** | `id UUID` | Linked 1-to-1 to `auth.users(id)` | `full_name`, `phone`, `email`, `role`, `avatar_url` |
-| **`workers`** | `id UUID` | `user_id -> users(id)` (1-to-1) | `experience_years`, `hourly_rate`, `rating`, `total_reviews`, `is_available`, `is_verified`, `service_radius_km`, `location (Point, 4326)` |
-| **`skills`** | `id UUID` | None | `name` (UNIQUE), `category`, `description` |
-| **`worker_skills`** | `(worker_id, skill_id)` | `worker_id -> workers(id)`, `skill_id -> skills(id)` | `experience_years` |
-| **`service_requests`** | `id UUID` | `customer_id -> users(id)` | `raw_description`, `extracted_category`, `extracted_skills`, `urgency`, `location (Point, 4326)`, `status` |
-| **`bookings`** | `id UUID` | `customer_id -> users(id)`, `worker_id -> workers(id)`, `service_request_id -> service_requests(id)` | `scheduled_time`, `status`, `total_amount`, `notes` |
-| **`reviews`** | `id UUID` | `booking_id -> bookings(id)` (UNIQUE), `customer_id -> users(id)`, `worker_id -> workers(id)` | `rating (1..5)`, `comment` |
+### 1. `public.users`
+* **Purpose**: Application profile table linked 1-to-1 with Supabase Auth (`auth.users.id`).
+* **Primary Key**: `id UUID REFERENCES auth.users(id) ON DELETE CASCADE`
+* **Key Columns**:
+  * `full_name TEXT NOT NULL`
+  * `phone TEXT`, `email TEXT`, `avatar_url TEXT`
+  * `role user_role NOT NULL DEFAULT 'customer'` (Controlled values: `'customer'`, `'worker'`)
+  * `created_at`, `updated_at` (Auto-updated via trigger)
+
+### 2. `public.workers`
+* **Purpose**: Worker profile extension for users providing services.
+* **Primary Key**: `id UUID DEFAULT gen_random_uuid()`
+* **Key Constraints**:
+  * `user_id UUID NOT NULL UNIQUE REFERENCES public.users(id) ON DELETE CASCADE` — **Enforces 1:1 relationship** (one user can have at most one worker profile).
+  * `experience_years NUMERIC(4,1) CHECK (experience_years >= 0)` — Represents **total professional experience**.
+  * `rating NUMERIC(3,2) CHECK (0.00 <= rating <= 5.00)` — **Derived/cached value** automatically recalculated by `fn_recalculate_worker_rating()` trigger on reviews table (not freely editable by users).
+  * `total_reviews INTEGER CHECK (total_reviews >= 0)` — **Derived/cached count** maintained by trigger.
+  * `is_available BOOLEAN NOT NULL DEFAULT TRUE`
+  * `is_verified BOOLEAN NOT NULL DEFAULT FALSE`
+  * `service_radius_km NUMERIC(5,2) CHECK (service_radius_km > 0)` — Service operational radius.
+  * `location GEOGRAPHY(Point, 4326) NOT NULL` — PostGIS point location indexed with GiST.
+
+### 3. `public.skills`
+* **Purpose**: Master canonical skills catalogue across domains.
+* **Primary Key**: `id UUID DEFAULT gen_random_uuid()`
+* **Key Columns**:
+  * `name TEXT NOT NULL UNIQUE` (e.g., `'Pipe Repair'`, `'House Wiring'`)
+  * `category TEXT NOT NULL` (e.g., `'Plumbing'`, `'Electrical'`, `'Carpentry'`, `'Appliance Repair'`)
+  * `description TEXT`
+
+### 4. `public.worker_skills`
+* **Purpose**: Many-to-many relationship linking workers to their qualified skills.
+* **Primary Key**: `id UUID DEFAULT gen_random_uuid()`
+* **Key Constraints**:
+  * `worker_id UUID REFERENCES public.workers(id) ON DELETE CASCADE`
+  * `skill_id UUID REFERENCES public.skills(id) ON DELETE CASCADE`
+  * `CONSTRAINT uq_worker_skill UNIQUE (worker_id, skill_id)` — Prevents duplicate worker-skill mappings.
+  * `experience_years NUMERIC(4,1) CHECK (experience_years >= 0)` — Represents **experience specific to this skill**.
+
+### 5. `public.service_requests`
+* **Purpose**: User-submitted problem descriptions and AI-extracted requirement parameters.
+* **Primary Key**: `id UUID DEFAULT gen_random_uuid()`
+* **Key Constraints**:
+  * `customer_id UUID REFERENCES public.users(id) ON DELETE CASCADE`
+  * `raw_description TEXT NOT NULL`
+  * `extracted_category TEXT`
+  * `extracted_skills TEXT[] DEFAULT '{}'` — PostgreSQL array of tags extracted by AI (*Note: Canonical skills are stored in the `skills` table*).
+  * `urgency urgency_level NOT NULL DEFAULT 'normal'` (Controlled values: `'low'`, `'normal'`, `'high'`, `'emergency'`).
+  * `location GEOGRAPHY(Point, 4326) NOT NULL` — PostGIS point location indexed with GiST.
+  * `status request_status NOT NULL DEFAULT 'open'` (Controlled values: `'open'`, `'matched'`, `'booked'`, `'completed'`, `'cancelled'`).
+
+### 6. `public.bookings`
+* **Purpose**: Service booking transactions between customer and worker.
+* **Primary Key**: `id UUID DEFAULT gen_random_uuid()`
+* **Key Constraints**:
+  * `customer_id UUID REFERENCES public.users(id) ON DELETE RESTRICT` (Preserves booking transaction history).
+  * `worker_id UUID REFERENCES public.workers(id) ON DELETE RESTRICT` (Preserves booking transaction history).
+  * `service_request_id UUID REFERENCES public.service_requests(id) ON DELETE SET NULL`
+  * `scheduled_time TIMESTAMPTZ NOT NULL`
+  * `status booking_status NOT NULL DEFAULT 'pending'` (Controlled values: `'pending'`, `'accepted'`, `'rejected'`, `'cancelled'`, `'completed'`).
+  * `notes TEXT`
+
+### 7. `public.reviews`
+* **Purpose**: Customer feedback and star rating upon booking completion.
+* **Primary Key**: `id UUID DEFAULT gen_random_uuid()`
+* **Key Constraints**:
+  * `booking_id UUID NOT NULL UNIQUE REFERENCES public.bookings(id) ON DELETE CASCADE` — **Enforces at most one review per booking**.
+  * `customer_id UUID REFERENCES public.users(id) ON DELETE CASCADE`
+  * `worker_id UUID REFERENCES public.workers(id) ON DELETE CASCADE`
+  * `rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5)`
+  * `comment TEXT`
 
 ---
 
-## 🌍 PostGIS Spatial Querying
+## 🌍 PostGIS Spatial Querying & Indexes
 
-Both `workers.location` and `service_requests.location` use `GEOGRAPHY(Point, 4326)` with **GiST (Generalized Search Tree) spatial indexing** for fast geographic bounding calculations.
+### Spatial GiST Indexes
+```sql
+CREATE INDEX idx_workers_location ON public.workers USING GIST (location);
+CREATE INDEX idx_service_requests_location ON public.service_requests USING GIST (location);
+```
 
-### Example: "Find electricians within 5 km of user coordinates"
-Given user location: Longitude `77.6300`, Latitude `12.9500`:
+### Standard Indexes
+```sql
+CREATE INDEX idx_workers_user_id ON public.workers(user_id);
+CREATE INDEX idx_workers_is_available ON public.workers(is_available);
+CREATE INDEX idx_workers_is_verified ON public.workers(is_verified);
+
+CREATE INDEX idx_worker_skills_worker_id ON public.worker_skills(worker_id);
+CREATE INDEX idx_worker_skills_skill_id ON public.worker_skills(skill_id);
+
+CREATE INDEX idx_service_requests_customer_id ON public.service_requests(customer_id);
+CREATE INDEX idx_service_requests_status ON public.service_requests(status);
+
+CREATE INDEX idx_bookings_customer_id ON public.bookings(customer_id);
+CREATE INDEX idx_bookings_worker_id ON public.bookings(worker_id);
+CREATE INDEX idx_bookings_status ON public.bookings(status);
+
+CREATE INDEX idx_reviews_worker_id ON public.reviews(worker_id);
+```
+
+### Dynamic Spatial Search Query Example
+To find available plumbers within 5 km of user coordinates (`longitude: 77.6400`, `latitude: 12.9750`):
 
 ```sql
 SELECT 
@@ -44,11 +129,11 @@ SELECT
     w.hourly_rate,
     w.rating,
     w.total_reviews,
-    w.address_text,
+    w.experience_years AS total_experience_years,
     ROUND(
         (ST_Distance(
             w.location, 
-            ST_SetSRID(ST_MakePoint(77.6300, 12.9500), 4326)::geography
+            ST_SetSRID(ST_MakePoint(77.6400, 12.9750), 4326)::geography
         ) / 1000.0)::numeric, 
         2
     ) AS distance_km
@@ -56,50 +141,36 @@ FROM public.workers w
 JOIN public.users u ON w.user_id = u.id
 JOIN public.worker_skills ws ON w.id = ws.worker_id
 JOIN public.skills s ON ws.skill_id = s.id
-WHERE s.category = 'Electrical'
+WHERE s.category = 'Plumbing'
   AND w.is_available = TRUE
   AND ST_DWithin(
       w.location, 
-      ST_SetSRID(ST_MakePoint(77.6300, 12.9500), 4326)::geography, 
-      5000 -- 5000 meters = 5 km
+      ST_SetSRID(ST_MakePoint(77.6400, 12.9750), 4326)::geography, 
+      5000 -- 5 km in meters
   )
-GROUP BY w.id, u.full_name, u.phone, w.hourly_rate, w.rating, w.total_reviews, w.address_text, w.location
+GROUP BY w.id, u.full_name, u.phone, w.hourly_rate, w.rating, w.total_reviews, w.experience_years, w.location
 ORDER BY distance_km ASC;
 ```
 
 ---
 
-## 🔒 Row Level Security (RLS) Policies
+## 🔒 Row Level Security (RLS) Summary
 
-1. **`users`**:
-   - Profiles viewable by everyone.
-   - Insert and update restricted to the authenticated user (`auth.uid() = id`).
-2. **`workers`**:
-   - Worker profiles publicly viewable.
-   - Registration and updates restricted to the worker (`auth.uid() = user_id`).
-3. **`skills` & `worker_skills`**:
-   - Skills catalogue viewable by everyone.
-   - Worker skill mappings manageable only by the owning worker.
-4. **`service_requests`**:
-   - Only the owning customer can view, create, or update their service requests (`auth.uid() = customer_id`).
-5. **`bookings`**:
-   - Only participants (customer or assigned worker) can view or update booking statuses.
-6. **`reviews`**:
-   - Publicly readable.
-   - Insertable only by the customer for completed bookings (`status = 'completed'`).
+| Table | SELECT | INSERT | UPDATE | DELETE |
+| :--- | :--- | :--- | :--- | :--- |
+| **`users`** | Public | Self (`auth.uid() = id`) | Self (`auth.uid() = id`) | Self |
+| **`workers`** | Public | Self (`auth.uid() = user_id`) | Self (`auth.uid() = user_id`) | Self |
+| **`skills`** | Public | Admin | Admin | Admin |
+| **`worker_skills`** | Public | Owning worker | Owning worker | Owning worker |
+| **`service_requests`** | Customer (`auth.uid() = customer_id`) | Customer (`auth.uid() = customer_id`) | Customer | Customer |
+| **`bookings`** | Booking participants | Customer | Booking participants | None |
+| **`reviews`** | Public | Customer on completed booking | None | Self |
 
 ---
 
 ## 🚀 Setup & Execution Guide
 
-### Option A: Supabase Cloud Dashboard
-1. Go to your **Supabase Dashboard** $\rightarrow$ **SQL Editor**.
-2. Create a new query, paste the contents of [`schema.sql`](schema.sql), and click **Run**.
-3. Create another query, paste [`seed.sql`](seed.sql), and click **Run**.
-
-### Option B: Local PostgreSQL (with PostGIS)
-```bash
-# Connect using psql and execute
-psql -U postgres -d project_unknown -f database/schema.sql
-psql -U postgres -d project_unknown -f database/seed.sql
-```
+### In Supabase Dashboard
+1. Go to **SQL Editor**.
+2. Run [`schema.sql`](schema.sql) to initialize tables, GiST indexes, triggers, and RLS policies.
+3. Run [`seed.sql`](seed.sql) to populate 10 fictional workers, 14 canonical skills, and Bengaluru reference coordinates.
