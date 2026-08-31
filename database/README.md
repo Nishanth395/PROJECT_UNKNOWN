@@ -1,6 +1,6 @@
 # Database Module (PostgreSQL + PostGIS + Supabase)
 
-This directory contains the complete database schema, spatial indexing setup, and development seed dataset for **Project Unknown**.
+This directory contains the database schema, spatial indexing setup, canonical reference seeds, and development worker datasets for **Project Unknown**.
 
 ---
 
@@ -8,169 +8,128 @@ This directory contains the complete database schema, spatial indexing setup, an
 
 ```text
 database/
-├── schema.sql      # DDL table definitions, enums, triggers, PostGIS indexes, and RLS policies
-├── seed.sql        # Realistic development seed data (10 workers, 14 skills, worker-skill mappings)
-└── README.md       # Database architecture, table descriptions, constraints, and setup instructions
+├── schema.sql         # DDL table definitions, enums, triggers, PostGIS indexes, and RLS policies
+├── seed.sql           # Canonical skills reference seed (100% Auth-independent)
+├── demo-workers.sql   # Demo worker profiles & skill mappings (Requires Supabase Auth users)
+└── README.md          # Setup sequence, verification queries, and schema documentation
 ```
 
 ---
 
-## 🏛️ Database Tables & Important Constraints
+## ⚙️ Complete Setup Sequence
 
-### 1. `public.users`
-* **Purpose**: Application profile table linked 1-to-1 with Supabase Auth (`auth.users.id`).
-* **Primary Key**: `id UUID REFERENCES auth.users(id) ON DELETE CASCADE`
-* **Key Columns**:
-  * `full_name TEXT NOT NULL`
-  * `phone TEXT`, `email TEXT`, `avatar_url TEXT`
-  * `role user_role NOT NULL DEFAULT 'customer'` (Controlled values: `'customer'`, `'worker'`)
-  * `created_at`, `updated_at` (Auto-updated via trigger)
+To maintain **100% foreign key integrity** with Supabase Auth (`public.users.id → auth.users.id`) without bypassing or manipulating internal auth tables:
 
-### 2. `public.workers`
-* **Purpose**: Worker profile extension for users providing services.
-* **Primary Key**: `id UUID DEFAULT gen_random_uuid()`
-* **Key Constraints**:
-  * `user_id UUID NOT NULL UNIQUE REFERENCES public.users(id) ON DELETE CASCADE` — **Enforces 1:1 relationship** (one user can have at most one worker profile).
-  * `experience_years NUMERIC(4,1) CHECK (experience_years >= 0)` — Represents **total professional experience**.
-  * `rating NUMERIC(3,2) CHECK (0.00 <= rating <= 5.00)` — **Derived/cached value** automatically recalculated by `fn_recalculate_worker_rating()` trigger on reviews table (not freely editable by users).
-  * `total_reviews INTEGER CHECK (total_reviews >= 0)` — **Derived/cached count** maintained by trigger.
-  * `is_available BOOLEAN NOT NULL DEFAULT TRUE`
-  * `is_verified BOOLEAN NOT NULL DEFAULT FALSE`
-  * `service_radius_km NUMERIC(5,2) CHECK (service_radius_km > 0)` — Service operational radius.
-  * `location GEOGRAPHY(Point, 4326) NOT NULL` — PostGIS point location indexed with GiST.
+### Step A: Run `schema.sql`
+In the **Supabase Dashboard → SQL Editor** (or via `psql`), execute [`schema.sql`](schema.sql) to create all tables, PostGIS extensions, triggers, indexes, and Row-Level Security policies.
 
-### 3. `public.skills`
-* **Purpose**: Master canonical skills catalogue across domains.
-* **Primary Key**: `id UUID DEFAULT gen_random_uuid()`
-* **Key Columns**:
-  * `name TEXT NOT NULL UNIQUE` (e.g., `'Pipe Repair'`, `'House Wiring'`)
-  * `category TEXT NOT NULL` (e.g., `'Plumbing'`, `'Electrical'`, `'Carpentry'`, `'Appliance Repair'`)
-  * `description TEXT`
+### Step B: Create Development Users via Supabase Auth
+Create development/demo accounts through Supabase Auth (via **Supabase Dashboard → Authentication → Users → Add user**, or through the Flutter app / Supabase client SDK).
 
-### 4. `public.worker_skills`
-* **Purpose**: Many-to-many relationship linking workers to their qualified skills.
-* **Primary Key**: `id UUID DEFAULT gen_random_uuid()`
-* **Key Constraints**:
-  * `worker_id UUID REFERENCES public.workers(id) ON DELETE CASCADE`
-  * `skill_id UUID REFERENCES public.skills(id) ON DELETE CASCADE`
-  * `CONSTRAINT uq_worker_skill UNIQUE (worker_id, skill_id)` — Prevents duplicate worker-skill mappings.
-  * `experience_years NUMERIC(4,1) CHECK (experience_years >= 0)` — Represents **experience specific to this skill**.
+Example demo emails:
+* `ramesh.kumar@example.com`
+* `suresh.patil@example.com`
+* `priya.sharma@example.com`
+* `amit.verma@example.com`
+* `rajesh.nair@example.com`
+* `sunita.rao@example.com`
+* `manoj.joshi@example.com`
+* `deepa.patel@example.com`
+* `vikram.singh@example.com`
+* `ananya.mukherjee@example.com`
 
-### 5. `public.service_requests`
-* **Purpose**: User-submitted problem descriptions and AI-extracted requirement parameters.
-* **Primary Key**: `id UUID DEFAULT gen_random_uuid()`
-* **Key Constraints**:
-  * `customer_id UUID REFERENCES public.users(id) ON DELETE CASCADE`
-  * `raw_description TEXT NOT NULL`
-  * `extracted_category TEXT`
-  * `extracted_skills TEXT[] DEFAULT '{}'` — PostgreSQL array of tags extracted by AI (*Note: Canonical skills are stored in the `skills` table*).
-  * `urgency urgency_level NOT NULL DEFAULT 'normal'` (Controlled values: `'low'`, `'normal'`, `'high'`, `'emergency'`).
-  * `location GEOGRAPHY(Point, 4326) NOT NULL` — PostGIS point location indexed with GiST.
-  * `status request_status NOT NULL DEFAULT 'open'` (Controlled values: `'open'`, `'matched'`, `'booked'`, `'completed'`, `'cancelled'`).
+### Step C: Create Corresponding `public.users` Profiles
+Insert matching application profile rows into `public.users` using the generated `auth.users.id`:
+```sql
+INSERT INTO public.users (id, full_name, phone, email, role)
+SELECT id, raw_user_meta_data->>'full_name', phone, email, 'worker'::user_role
+FROM auth.users
+WHERE email IN (
+    'ramesh.kumar@example.com',
+    'suresh.patil@example.com',
+    'priya.sharma@example.com',
+    'amit.verma@example.com',
+    'rajesh.nair@example.com',
+    'sunita.rao@example.com',
+    'manoj.joshi@example.com',
+    'deepa.patel@example.com',
+    'vikram.singh@example.com',
+    'ananya.mukherjee@example.com'
+)
+ON CONFLICT (id) DO NOTHING;
+```
 
-### 6. `public.bookings`
-* **Purpose**: Service booking transactions between customer and worker.
-* **Primary Key**: `id UUID DEFAULT gen_random_uuid()`
-* **Key Constraints**:
-  * `customer_id UUID REFERENCES public.users(id) ON DELETE RESTRICT` (Preserves booking transaction history).
-  * `worker_id UUID REFERENCES public.workers(id) ON DELETE RESTRICT` (Preserves booking transaction history).
-  * `service_request_id UUID REFERENCES public.service_requests(id) ON DELETE SET NULL`
-  * `scheduled_time TIMESTAMPTZ NOT NULL`
-  * `status booking_status NOT NULL DEFAULT 'pending'` (Controlled values: `'pending'`, `'accepted'`, `'rejected'`, `'cancelled'`, `'completed'`).
-  * `notes TEXT`
+### Step D: Run `seed.sql`
+Run [`seed.sql`](seed.sql) to populate the 14 canonical skills across Plumbing, Electrical, Carpentry, Appliance Repair, Mechanic, and Tutoring.
 
-### 7. `public.reviews`
-* **Purpose**: Customer feedback and star rating upon booking completion.
-* **Primary Key**: `id UUID DEFAULT gen_random_uuid()`
-* **Key Constraints**:
-  * `booking_id UUID NOT NULL UNIQUE REFERENCES public.bookings(id) ON DELETE CASCADE` — **Enforces at most one review per booking**.
-  * `customer_id UUID REFERENCES public.users(id) ON DELETE CASCADE`
-  * `worker_id UUID REFERENCES public.workers(id) ON DELETE CASCADE`
-  * `rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5)`
-  * `comment TEXT`
+### Step E: Run `demo-workers.sql`
+Run [`demo-workers.sql`](demo-workers.sql) to link the 10 worker profiles and their skill experience mappings to the users created in Step B & C.
+
+### Step F: Run Verification Queries
+Run the verification queries below to ensure data integrity.
 
 ---
 
-## 🌍 PostGIS Spatial Querying & Indexes
+## 🔍 Database Integrity Verification SQL
 
-### Spatial GiST Indexes
-```sql
-CREATE INDEX idx_workers_location ON public.workers USING GIST (location);
-CREATE INDEX idx_service_requests_location ON public.service_requests USING GIST (location);
-```
-
-### Standard Indexes
-```sql
-CREATE INDEX idx_workers_user_id ON public.workers(user_id);
-CREATE INDEX idx_workers_is_available ON public.workers(is_available);
-CREATE INDEX idx_workers_is_verified ON public.workers(is_verified);
-
-CREATE INDEX idx_worker_skills_worker_id ON public.worker_skills(worker_id);
-CREATE INDEX idx_worker_skills_skill_id ON public.worker_skills(skill_id);
-
-CREATE INDEX idx_service_requests_customer_id ON public.service_requests(customer_id);
-CREATE INDEX idx_service_requests_status ON public.service_requests(status);
-
-CREATE INDEX idx_bookings_customer_id ON public.bookings(customer_id);
-CREATE INDEX idx_bookings_worker_id ON public.bookings(worker_id);
-CREATE INDEX idx_bookings_status ON public.bookings(status);
-
-CREATE INDEX idx_reviews_worker_id ON public.reviews(worker_id);
-```
-
-### Dynamic Spatial Search Query Example
-To find available plumbers within 5 km of user coordinates (`longitude: 77.6400`, `latitude: 12.9750`):
+Run this script in the Supabase SQL Editor to verify that all constraints and relationships are satisfied:
 
 ```sql
+-- 1. Check Canonical Skills Count
+SELECT COUNT(*) AS total_skills, 
+       COUNT(DISTINCT category) AS total_categories 
+FROM public.skills;
+
+-- 2. Check Workers Count
+SELECT COUNT(*) AS total_workers,
+       COUNT(*) FILTER (WHERE is_available = TRUE) AS available_workers,
+       COUNT(*) FILTER (WHERE is_verified = TRUE) AS verified_workers
+FROM public.workers;
+
+-- 3. Check Worker Skills Mappings
+SELECT COUNT(*) AS total_worker_skills,
+       COUNT(DISTINCT worker_id) AS workers_with_skills
+FROM public.worker_skills;
+
+-- 4. Verify Every Worker references a valid public.users row (Orphan Check)
+SELECT w.id AS orphan_worker_id, w.user_id
+FROM public.workers w
+LEFT JOIN public.users u ON w.user_id = u.id
+WHERE u.id IS NULL;
+-- Expected result: 0 rows
+
+-- 5. Verify Every public.users worker references an existing auth.users row
+SELECT u.id AS orphan_user_id, u.email
+FROM public.users u
+LEFT JOIN auth.users au ON u.id = au.id
+WHERE au.id IS NULL;
+-- Expected result: 0 rows
+
+-- 6. Inspect Sample Worker with Skills and Location
 SELECT 
     w.id AS worker_id,
     u.full_name,
-    u.phone,
+    u.email,
     w.hourly_rate,
     w.rating,
     w.total_reviews,
-    w.experience_years AS total_experience_years,
-    ROUND(
-        (ST_Distance(
-            w.location, 
-            ST_SetSRID(ST_MakePoint(77.6400, 12.9750), 4326)::geography
-        ) / 1000.0)::numeric, 
-        2
-    ) AS distance_km
+    w.address_text,
+    ARRAY_AGG(s.name) AS skills_list
 FROM public.workers w
 JOIN public.users u ON w.user_id = u.id
-JOIN public.worker_skills ws ON w.id = ws.worker_id
-JOIN public.skills s ON ws.skill_id = s.id
-WHERE s.category = 'Plumbing'
-  AND w.is_available = TRUE
-  AND ST_DWithin(
-      w.location, 
-      ST_SetSRID(ST_MakePoint(77.6400, 12.9750), 4326)::geography, 
-      5000 -- 5 km in meters
-  )
-GROUP BY w.id, u.full_name, u.phone, w.hourly_rate, w.rating, w.total_reviews, w.experience_years, w.location
-ORDER BY distance_km ASC;
+LEFT JOIN public.worker_skills ws ON w.id = ws.worker_id
+LEFT JOIN public.skills s ON ws.skill_id = s.id
+GROUP BY w.id, u.full_name, u.email, w.hourly_rate, w.rating, w.total_reviews, w.address_text;
 ```
 
 ---
 
-## 🔒 Row Level Security (RLS) Summary
+## 🏛️ Schema Summary & Relationships
 
-| Table | SELECT | INSERT | UPDATE | DELETE |
-| :--- | :--- | :--- | :--- | :--- |
-| **`users`** | Public | Self (`auth.uid() = id`) | Self (`auth.uid() = id`) | Self |
-| **`workers`** | Public | Self (`auth.uid() = user_id`) | Self (`auth.uid() = user_id`) | Self |
-| **`skills`** | Public | Admin | Admin | Admin |
-| **`worker_skills`** | Public | Owning worker | Owning worker | Owning worker |
-| **`service_requests`** | Customer (`auth.uid() = customer_id`) | Customer (`auth.uid() = customer_id`) | Customer | Customer |
-| **`bookings`** | Booking participants | Customer | Booking participants | None |
-| **`reviews`** | Public | Customer on completed booking | None | Self |
-
----
-
-## 🚀 Setup & Execution Guide
-
-### In Supabase Dashboard
-1. Go to **SQL Editor**.
-2. Run [`schema.sql`](schema.sql) to initialize tables, GiST indexes, triggers, and RLS policies.
-3. Run [`seed.sql`](seed.sql) to populate 10 fictional workers, 14 canonical skills, and Bengaluru reference coordinates.
+* **`users`**: Extends `auth.users(id)` 1-to-1 (`id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE`).
+* **`workers`**: Extends `users(id)` 1-to-1 (`user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE`).
+* **`skills`**: Canonical skill repository (`name UNIQUE`, `category`).
+* **`worker_skills`**: Many-to-many (`UNIQUE(worker_id, skill_id)`), stores skill-specific `experience_years`.
+* **`service_requests`**: Stores customer problem descriptions with PostGIS points (`Point, 4326`) and `extracted_skills TEXT[]`.
+* **`bookings`**: Transactional records (`customer_id`, `worker_id`, `scheduled_time`, `status`).
+* **`reviews`**: One review per booking (`booking_id UNIQUE`), automatically recalculates `workers.rating` and `workers.total_reviews` via trigger.
