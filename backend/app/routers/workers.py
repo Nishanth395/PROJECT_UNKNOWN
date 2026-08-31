@@ -3,11 +3,108 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, HTTPException, status, Path
 from sqlalchemy.orm import Session
 from app.db.database import get_db
+from app.db.models import User
+from app.core.security import require_worker
 from app.services.worker_service import WorkerService
-from app.schemas.worker import WorkerListResponse, WorkerDetail
+from app.schemas.worker import (
+    WorkerListResponse,
+    WorkerDetail,
+    WorkerProfileCreate,
+    WorkerProfileUpdate,
+    WorkerProfileResponse,
+    WorkerSkillsUpdateRequest,
+    WorkerSkillsResponse,
+)
 
 router = APIRouter(prefix="/workers", tags=["Workers"])
 
+
+# ==============================================================================
+# Authenticated Worker Profile Endpoints (/workers/me)
+# Declared BEFORE /{worker_id} to prevent path conflict with UUID routing.
+# ==============================================================================
+
+@router.get(
+    "/me",
+    response_model=WorkerProfileResponse,
+    summary="Get Authenticated Worker Profile",
+    description="Retrieves the full profile, base location coordinates, rating, and assigned skills of the authenticated worker.",
+)
+def get_my_worker_profile(
+    current_worker: User = Depends(require_worker),
+    db: Session = Depends(get_db),
+) -> WorkerProfileResponse:
+    profile = WorkerService.get_worker_by_user_id(db=db, user_id=current_worker.id)
+    if not profile:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error_code": "WORKER_PROFILE_NOT_FOUND",
+                "message": "Worker profile does not exist for this account. Please complete onboarding.",
+            },
+        )
+    return profile
+
+
+@router.post(
+    "/me",
+    response_model=WorkerProfileResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create Worker Profile (Onboarding)",
+    description="Creates a new worker profile record for an authenticated user with role='worker'.",
+)
+def create_my_worker_profile(
+    data: WorkerProfileCreate,
+    current_worker: User = Depends(require_worker),
+    db: Session = Depends(get_db),
+) -> WorkerProfileResponse:
+    return WorkerService.create_worker_profile(db=db, user=current_worker, data=data)
+
+
+@router.patch(
+    "/me",
+    response_model=WorkerProfileResponse,
+    summary="Update Worker Profile",
+    description="Updates editable worker profile fields: bio, experience, service radius, location, and availability.",
+)
+def update_my_worker_profile(
+    data: WorkerProfileUpdate,
+    current_worker: User = Depends(require_worker),
+    db: Session = Depends(get_db),
+) -> WorkerProfileResponse:
+    return WorkerService.update_worker_profile(db=db, user=current_worker, data=data)
+
+
+@router.get(
+    "/me/skills",
+    response_model=WorkerSkillsResponse,
+    summary="Get Assigned Worker Skills",
+    description="Retrieves the canonical skills and specific years of experience for the authenticated worker.",
+)
+def get_my_worker_skills(
+    current_worker: User = Depends(require_worker),
+    db: Session = Depends(get_db),
+) -> WorkerSkillsResponse:
+    return WorkerService.get_worker_skills(db=db, user=current_worker)
+
+
+@router.put(
+    "/me/skills",
+    response_model=WorkerSkillsResponse,
+    summary="Update Worker Canonical Skills",
+    description="Updates the set of canonical skills and domain experience for the authenticated worker.",
+)
+def update_my_worker_skills(
+    data: WorkerSkillsUpdateRequest,
+    current_worker: User = Depends(require_worker),
+    db: Session = Depends(get_db),
+) -> WorkerSkillsResponse:
+    return WorkerService.update_worker_skills(db=db, user=current_worker, data=data)
+
+
+# ==============================================================================
+# Public / Discovery Worker Endpoints
+# ==============================================================================
 
 @router.get(
     "",
