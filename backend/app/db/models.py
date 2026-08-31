@@ -39,6 +39,25 @@ class PointGeographyType(TypeDecorator):
             return dialect.type_descriptor(Geography(geometry_type="POINT", srid=4326, spatial_index=False))
         return dialect.type_descriptor(Text)
 
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        from geoalchemy2.elements import WKTElement, WKBElement
+        if dialect.name == "postgresql":
+            if isinstance(value, WKTElement):
+                return value
+            if isinstance(value, str):
+                return WKTElement(value, srid=4326)
+            return value
+        if isinstance(value, WKTElement):
+            return str(value.data)
+        if isinstance(value, WKBElement):
+            return str(value)
+        return str(value)
+
+    def process_result_value(self, value, dialect):
+        return value
+
 
 class TextArrayType(TypeDecorator):
     """

@@ -6,6 +6,13 @@ from app.schemas.common import HealthResponse, DatabaseHealthResponse, ErrorResp
 from app.schemas.skill import SkillResponse, SkillListResponse, CategoryGroupedSkills, CategoriesSkillsResponse
 from app.schemas.worker import WorkerSkillItem, WorkerSummary, WorkerDetail, WorkerListResponse
 from app.schemas.auth import AuthenticatedUser, AuthMeResponse
+from app.schemas.service_request import (
+    ServiceRequestCreate,
+    ServiceRequestResponse,
+    ServiceRequestListResponse,
+    UrgencyLevel,
+    RequestStatus,
+)
 
 __all__ = [
     "HealthResponse",
@@ -21,4 +28,9 @@ __all__ = [
     "WorkerListResponse",
     "AuthenticatedUser",
     "AuthMeResponse",
+    "ServiceRequestCreate",
+    "ServiceRequestResponse",
+    "ServiceRequestListResponse",
+    "UrgencyLevel",
+    "RequestStatus",
 ]

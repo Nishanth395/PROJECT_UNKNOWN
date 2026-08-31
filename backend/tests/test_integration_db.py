@@ -1,8 +1,12 @@
+import time
+import uuid
+import jwt
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from app.main import app
 from app.db.database import SessionLocal
+from app.db.models import User, ServiceRequest
 from app.core.config import settings
 
 
@@ -100,3 +104,73 @@ def test_live_worker_detail_lookup(live_client: TestClient):
     assert detail["id"] == worker_id
     assert detail["full_name"] == first_worker["full_name"]
     assert "email" in detail
+
+
+@live_db_required
+def test_live_service_request_lifecycle(live_client: TestClient):
+    """Verify service request creation and PostGIS geography storage in live PostgreSQL database."""
+    db = SessionLocal()
+    existing_user = db.query(User).first()
+    if not existing_user:
+        db.close()
+        pytest.skip("No users found in live database to test service requests")
+
+    customer_id = existing_user.id
+    original_role = existing_user.role
+
+    # Temporarily allow customer role for this integration test
+    existing_user.role = "customer"
+    db.commit()
+
+    # Generate valid test JWT
+    now = int(time.time())
+    payload = {
+        "sub": str(customer_id),
+        "email": existing_user.email,
+        "role": "authenticated",
+        "aud": "authenticated",
+        "iat": now,
+        "exp": now + 3600,
+    }
+    secret = settings.SUPABASE_JWT_SECRET or "test-secret"
+    token = jwt.encode(payload, secret, algorithm="HS256")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    created_request_id = None
+    try:
+        # 1. POST /service-requests
+        create_payload = {
+            "description": "Live DB integration test: Pipe leaking under kitchen sink",
+            "latitude": 12.9716,
+            "longitude": 77.5946,
+            "urgency": "high",
+            "address_text": "MG Road, Bengaluru",
+        }
+        create_res = live_client.post("/service-requests", json=create_payload, headers=headers)
+        assert create_res.status_code == 201
+        data = create_res.json()
+        assert data["customer_id"] == str(customer_id)
+        assert data["status"] == "open"
+        assert data["latitude"] == 12.9716
+        assert data["longitude"] == 77.5946
+        created_request_id = data["id"]
+
+        # 2. GET /service-requests
+        list_res = live_client.get("/service-requests", headers=headers)
+        assert list_res.status_code == 200
+        assert list_res.json()["total"] >= 1
+
+        # 3. GET /service-requests/{id}
+        get_res = live_client.get(f"/service-requests/{created_request_id}", headers=headers)
+        assert get_res.status_code == 200
+        assert get_res.json()["id"] == created_request_id
+
+    finally:
+        # Cleanup created records and restore user role
+        if created_request_id:
+            db.query(ServiceRequest).filter(ServiceRequest.id == uuid.UUID(created_request_id)).delete()
+        user_to_restore = db.query(User).filter(User.id == customer_id).first()
+        if user_to_restore:
+            user_to_restore.role = original_role
+        db.commit()
+        db.close()
