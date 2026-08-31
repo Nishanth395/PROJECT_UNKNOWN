@@ -1,6 +1,6 @@
 # Backend Module (FastAPI Modular Monolith)
 
-FastAPI backend server for **Project Unknown** providing REST APIs for service discovery, worker lookup, canonical skills catalogue, Supabase JWT authentication, customer service requests, and AI-assisted requirement extraction.
+FastAPI backend server for **Project Unknown** providing REST APIs for service discovery, worker lookup, canonical skills catalogue, Supabase JWT authentication, customer service requests, AI requirement extraction, and deterministic PostGIS worker matching.
 
 ---
 
@@ -26,17 +26,19 @@ backend/
 │   ├── routers/
 │   │   ├── auth.py         # GET /auth/me (JWT-protected profile lookup)
 │   │   ├── health.py       # GET /health, GET /health/db
-│   │   ├── service_requests.py # POST/GET /service-requests & POST /service-requests/{id}/extract
+│   │   ├── service_requests.py # POST/GET /service-requests, POST /extract, GET /matches
 │   │   ├── skills.py       # GET /skills, GET /skills/grouped
 │   │   └── workers.py      # GET /workers, GET /workers/{worker_id}
 │   ├── schemas/
-│   │   ├── ai.py           # Re-exported AI extraction schemas
+│   │   ├── ai.py           # AI extraction schemas
 │   │   ├── auth.py         # AuthenticatedUser and AuthMeResponse schemas
 │   │   ├── common.py       # Health, Database Health, and standard error response models
+│   │   ├── matching.py     # MatchedWorkerItem and WorkerMatchResponse schemas
 │   │   ├── service_request.py # Service request request/response schemas
 │   │   ├── skill.py        # Skill response and grouping schemas
 │   │   └── worker.py       # Worker summary and detail schemas
 │   └── services/
+│       ├── matching_service.py # PostGIS worker matching engine & score calculation
 │       ├── service_request_service.py # Service request database operations and PostGIS parsing
 │       ├── skill_service.py  # Skill database queries and grouping
 │       ├── user_service.py   # Database user lookups by verified JWT sub UUID
@@ -46,6 +48,7 @@ backend/
 │   ├── test_ai_extraction.py # AI extraction, provider fallback, and canonical validation tests
 │   ├── test_auth.py        # JWT authentication, headers, expiry, and role guard tests
 │   ├── test_health.py      # Health & DB ping endpoint tests
+│   ├── test_matching.py    # Deterministic matching formula, spatial filtering, and tie-breaking tests
 │   ├── test_service_requests.py # Customer service request lifecycle, security, and validation tests
 │   ├── test_skills.py      # Skills endpoint tests
 │   ├── test_workers.py     # Worker listing, pagination, filtering, and 404 tests
@@ -57,35 +60,53 @@ backend/
 
 ---
 
-## 🤖 AI Service Request Extraction Architecture
+## 🎯 Deterministic Worker Matching Engine (Phase 4B)
 
-Project Unknown uses an AI abstraction layer to convert unstructured customer problem descriptions into structured canonical requirements:
+Project Unknown uses a **deterministic, explainable, database-driven** matching engine to connect customer service requests with qualified local workers. The LLM is used **strictly for intent extraction**; worker selection is calculated entirely via PostGIS and mathematical formulas.
+
+### 1. Matching Pipeline
 
 ```text
-Customer Input ("Kitchen PVC water pipe burst and leaking heavily")
+Service Request (location, extracted_skills, extracted_category)
        ↓
-POST /service-requests/{id}/extract (Customer Authenticated)
+Pre-condition Check: Request MUST have extracted skills (returns 400 if empty)
        ↓
-AIExtractionService (app/ai/service.py)
-       ↓  (Fetches canonical catalogue from database: public.skills)
-AIProvider Interface (FallbackProvider / GeminiProvider)
-       ↓  (Extracts raw intent: category, skills, urgency, confidence)
-Canonical Validation & Normalization Filter
-  ├── 1. Validates category against public.skills categories
-  ├── 2. Filters out any non-canonical / hallucinated skills
-  └── 3. Deduplicates skills (Idempotent)
-       ↓  (Updates service_requests table)
-PostgreSQL Database:
-  ├── extracted_category: "Plumbing"
-  ├── extracted_skills: ["Pipe Repair", "Leak Fixing"]
-  └── raw_description: PRESERVED UNTOUCHED
+PostGIS Spatial Filter:
+  ├── 1. Availability filter: workers.is_available = TRUE
+  ├── 2. Skill compatibility: worker has at least 1 worker_skill matching extracted_skills
+  ├── 3. Category match: Skill.category matches extracted_category (if specified)
+  └── 4. Service Radius: ST_DWithin(worker.location, request.location, worker.service_radius_km * 1000)
+       ↓
+Distance Calculation: ST_Distance(worker.location, request.location) / 1000.0 (km)
+       ↓
+Deterministic Scoring Formula (Total: 100 points)
+       ↓
+Deterministic Tie-Breaking Sort & Limit (Default: 5, Max: 20)
+       ↓
+Response (WorkerMatchResponse)
 ```
 
-### Key AI Design Principles:
-1. **Vendor Agnostic Abstraction**: The core service layer depends strictly on the `AIProvider` interface.
-2. **Canonical Skill Constraining**: AI output is strictly validated against the 14 canonical skills in `public.skills`. Hallucinated or non-canonical skills are never stored in the database.
-3. **Deterministic Fallback Engine**: If no API key is provided or external LLM providers encounter a network/timeout error, the system automatically falls back to the deterministic keyword extractor with zero downtime.
-4. **Idempotency**: Repeated extractions do not corrupt database records or produce duplicate skill entries.
+### 2. Scoring Formula ($0 - 100$ Points)
+
+| Component | Weight | Formula | Description |
+| :--- | :--- | :--- | :--- |
+| **Skill Match** | $50$ pts | Constant $50.0$ | Worker possesses at least one requested canonical skill |
+| **Distance** | $25$ pts | $25.0 \times (1.0 - \frac{\text{distance\_km}}{\text{service\_radius\_km}})$ | Linear normalization relative to worker's own service radius (clamped to $[0, 25]$) |
+| **Rating** | $15$ pts | $(\frac{\text{rating}}{5.0}) \times 15.0$ | Normalized against $5.0$ scale (clamped to $[0, 15]$; $0$ if `NULL`) |
+| **Experience** | $10$ pts | $\min(\frac{\text{experience\_years}}{10.0}, 1.0) \times 10.0$ | Normalized experience capped at $10$ years (clamped to $[0, 10]$) |
+
+$$\text{match\_score} = \text{skill\_score} + \text{distance\_score} + \text{rating\_score} + \text{experience\_score}$$
+
+### 3. Deterministic Tie-Breaking
+When two workers produce identical `match_score` values, the ordering is determined by:
+1. **Higher Rating** (`rating DESC`)
+2. **Shorter Distance** (`distance_km ASC`)
+3. **Higher Experience** (`experience_years DESC`)
+4. **Verified Status** (`is_verified DESC`)
+5. **Stable Worker UUID** (`str(worker_id) ASC`)
+
+> [!NOTE]
+> This engine is a deterministic, explainable rule-based scoring engine for MVP matching. It does not use black-box machine learning ranking.
 
 ---
 
@@ -138,14 +159,11 @@ uvicorn app.main:app --reload --port 8000
 
 ### 3. Running Automated Tests
 ```bash
-# Run all tests (unit + auth + service requests + AI extraction + integration)
+# Run full test suite (unit + auth + service requests + AI extraction + matching + live PostGIS)
 pytest -v
 
-# Run AI extraction tests specifically
-pytest tests/test_ai_extraction.py -v
-
-# Run database integration tests against live Supabase
-pytest tests/test_integration_db.py -v
+# Run deterministic matching tests specifically
+pytest tests/test_matching.py -v
 ```
 
 ---
@@ -154,31 +172,39 @@ pytest tests/test_integration_db.py -v
 
 ### 1. Health Checks (Public)
 * `GET /health` or `GET /api/v1/health`
-  * Returns `{ "status": "ok", "service": "project-unknown-backend" }`
 * `GET /health/db` or `GET /api/v1/health/db`
-  * Returns `{ "status": "ok", "database": "connected" }`
 
 ### 2. Authentication (JWT Protected)
 * `GET /auth/me` or `GET /api/v1/auth/me`
-  * Returns authenticated user identity and `public.users` profile state.
 
-### 3. Service Requests (Authenticated Customer Only)
-* `POST /service-requests` (or `/api/v1/service-requests`)
-  * Submits new customer request.
-* `GET /service-requests` (or `/api/v1/service-requests`)
-  * Lists paginated requests owned by current customer.
-* `GET /service-requests/{request_id}` (or `/api/v1/service-requests/{request_id}`)
-  * Retrieves single customer request.
-* `POST /service-requests/{request_id}/extract` (or `/api/v1/service-requests/{request_id}/extract`)
+### 3. Service Requests & Matching (Authenticated Customer Only)
+* `POST /service-requests` (or `/api/v1/service-requests`) — Create new service request
+* `GET /service-requests` (or `/api/v1/service-requests`) — List customer's requests
+* `GET /service-requests/{request_id}` — Get single request
+* `POST /service-requests/{request_id}/extract` — AI intent & requirement extraction
+* `GET /service-requests/{request_id}/matches` (or `/api/v1/service-requests/{request_id}/matches`)
+  * **Query Params**: `limit` (int, 1-20, default 5)
   * **Header**: `Authorization: Bearer <token>`
   * **Response (`200 OK`)**:
     ```json
     {
       "request_id": "e305e940-0255-46fb-a0b4-7b6bb822602e",
-      "category": "Plumbing",
-      "skills": ["Pipe Repair", "Leak Fixing"],
-      "urgency": "high",
-      "confidence": 0.90
+      "total_matches": 2,
+      "matches": [
+        {
+          "worker_id": "b0000000-0000-0000-0000-000000000001",
+          "name": "Ramesh Kumar",
+          "category": "Plumbing",
+          "matched_skills": ["Pipe Repair"],
+          "distance_km": 3.35,
+          "rating": 4.85,
+          "total_reviews": 48,
+          "experience_years": 9.0,
+          "is_verified": true,
+          "is_available": true,
+          "match_score": 90.57
+        }
+      ]
     }
     ```
 
@@ -189,11 +215,3 @@ pytest tests/test_integration_db.py -v
 ### 5. Workers Discovery (Public)
 * `GET /workers` (or `/api/v1/workers`)
 * `GET /workers/{worker_id}` (or `/api/v1/workers/{worker_id}`)
-
----
-
-## 🔮 Future Endpoint Extension Placeholders
-
-The routing architecture is designed to seamlessly mount upcoming feature modules:
-* `POST /search/matches` — Spatial PostGIS worker matching using extracted skills
-* `POST /bookings` — Service engagement bookings

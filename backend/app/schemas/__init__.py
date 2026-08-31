@@ -14,6 +14,7 @@ from app.schemas.service_request import (
     RequestStatus,
 )
 from app.schemas.ai import ServiceRequirementExtraction, ExtractionResponse, ExtractionUrgency
+from app.schemas.matching import MatchedWorkerItem, WorkerMatchResponse
 
 __all__ = [
     "HealthResponse",
@@ -37,4 +38,6 @@ __all__ = [
     "ServiceRequirementExtraction",
     "ExtractionResponse",
     "ExtractionUrgency",
+    "MatchedWorkerItem",
+    "WorkerMatchResponse",
 ]

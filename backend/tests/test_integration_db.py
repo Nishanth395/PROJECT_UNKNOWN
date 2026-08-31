@@ -108,7 +108,7 @@ def test_live_worker_detail_lookup(live_client: TestClient):
 
 @live_db_required
 def test_live_service_request_lifecycle(live_client: TestClient):
-    """Verify service request creation, AI requirement extraction, and PostGIS geography in live PostgreSQL database."""
+    """Verify full service request lifecycle: creation, AI extraction, and deterministic PostGIS worker matching."""
     db = SessionLocal()
     existing_user = db.query(User).first()
     if not existing_user:
@@ -179,6 +179,19 @@ def test_live_service_request_lifecycle(live_client: TestClient):
         updated_record = db.query(ServiceRequest).filter(ServiceRequest.id == uuid.UUID(created_request_id)).first()
         assert updated_record.extracted_category == "Plumbing"
         assert "Pipe Repair" in updated_record.extracted_skills or "Leak Fixing" in updated_record.extracted_skills
+
+        # 6. GET /service-requests/{id}/matches (Deterministic PostGIS Worker Matching)
+        matches_res = live_client.get(f"/service-requests/{created_request_id}/matches", headers=headers)
+        assert matches_res.status_code == 200
+        matches_data = matches_res.json()
+        assert matches_data["request_id"] == created_request_id
+        assert matches_data["total_matches"] >= 1
+        top_match = matches_data["matches"][0]
+        assert "worker_id" in top_match
+        assert top_match["category"] == "Plumbing"
+        assert len(top_match["matched_skills"]) >= 1
+        assert top_match["distance_km"] > 0
+        assert top_match["match_score"] > 50.0
 
     finally:
         # Cleanup created records and restore user role

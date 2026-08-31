@@ -13,7 +13,9 @@ from app.schemas.service_request import (
     RequestStatus,
 )
 from app.schemas.ai import ExtractionResponse
+from app.schemas.matching import WorkerMatchResponse
 from app.services.service_request_service import ServiceRequestService
+from app.services.matching_service import MatchingService
 from app.ai.service import AIExtractionService
 
 router = APIRouter(prefix="/service-requests", tags=["Service Requests"])
@@ -125,4 +127,28 @@ async def extract_service_request_requirements(
         db=db,
         request_id=request_id,
         customer_id=current_user.id,
+    )
+
+
+@router.get(
+    "/{request_id}/matches",
+    response_model=WorkerMatchResponse,
+    summary="Find Matched Workers for Service Request",
+    description="Calculates deterministic geographic and skill compatibility scores for workers within service radius.",
+)
+def get_service_request_matches(
+    request_id: UUID,
+    limit: int = Query(default=5, ge=1, le=20, description="Maximum number of matched workers to return"),
+    current_user: User = Depends(require_customer),
+    db: Session = Depends(get_db),
+) -> WorkerMatchResponse:
+    """
+    Retrieves ranked matching workers for an extracted service request.
+    Requires customer authentication and ownership of the request.
+    """
+    return MatchingService.find_matches_for_request(
+        db=db,
+        request_id=request_id,
+        customer_id=current_user.id,
+        limit=limit,
     )
