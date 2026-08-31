@@ -1,5 +1,5 @@
 -- ==============================================================================
--- PROJECT UNKNOWN - DATABASE SCHEMA (SUPABASE POSTGIS COMPATIBLE)
+-- PROJECT UNKNOWN - DATABASE SCHEMA (HARDENED RLS & DERIVED FIELDS)
 -- ==============================================================================
 -- Database: PostgreSQL 15+ with PostGIS installed in 'extensions' schema
 -- Identity Provider: Supabase Auth (auth.users)
@@ -155,10 +155,10 @@ CREATE INDEX IF NOT EXISTS idx_bookings_status ON public.bookings(status);
 CREATE INDEX IF NOT EXISTS idx_reviews_worker_id ON public.reviews(worker_id);
 
 -- ------------------------------------------------------------------------------
--- 5. TRIGGER FUNCTIONS (Timestamp Updates & Derived Rating Recalculation)
+-- 5. TRIGGER FUNCTIONS (Timestamps, Rating Recalculation & Tamper Protection)
 -- ------------------------------------------------------------------------------
 
--- Trigger function: Update updated_at timestamp
+-- 5.1 Trigger function: Update updated_at timestamp
 CREATE OR REPLACE FUNCTION public.fn_set_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -187,7 +187,26 @@ CREATE TRIGGER trg_bookings_updated_at
     BEFORE UPDATE ON public.bookings
     FOR EACH ROW EXECUTE FUNCTION public.fn_set_updated_at();
 
--- Trigger function: Automatically recalculate derived rating and total_reviews on workers table
+-- 5.2 Trigger function: Prevent workers from manually tampering with derived rating & total_reviews
+CREATE OR REPLACE FUNCTION public.fn_prevent_worker_rating_tamper()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- When a worker updates their own profile (auth.uid() = OLD.user_id),
+    -- silently preserve rating and total_reviews from OLD values to prevent tampering.
+    IF (auth.uid() IS NOT NULL AND auth.uid() = OLD.user_id) THEN
+        NEW.rating := OLD.rating;
+        NEW.total_reviews := OLD.total_reviews;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_prevent_worker_rating_tamper ON public.workers;
+CREATE TRIGGER trg_prevent_worker_rating_tamper
+    BEFORE UPDATE ON public.workers
+    FOR EACH ROW EXECUTE FUNCTION public.fn_prevent_worker_rating_tamper();
+
+-- 5.3 Trigger function: Automatically recalculate derived rating and total_reviews on workers table
 CREATE OR REPLACE FUNCTION public.fn_recalculate_worker_rating()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -214,7 +233,7 @@ BEGIN
 
     RETURN NULL;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 DROP TRIGGER IF EXISTS trg_recalc_worker_rating ON public.reviews;
 CREATE TRIGGER trg_recalc_worker_rating
@@ -222,7 +241,7 @@ CREATE TRIGGER trg_recalc_worker_rating
     FOR EACH ROW EXECUTE FUNCTION public.fn_recalculate_worker_rating();
 
 -- ------------------------------------------------------------------------------
--- 6. ROW LEVEL SECURITY (RLS) POLICIES
+-- 6. ROW LEVEL SECURITY (RLS) POLICIES (Development Safe: DROP IF EXISTS)
 -- ------------------------------------------------------------------------------
 
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
@@ -234,42 +253,51 @@ ALTER TABLE public.bookings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.reviews ENABLE ROW LEVEL SECURITY;
 
 -- 6.1 Users Policies
+DROP POLICY IF EXISTS "Users profiles are viewable by everyone" ON public.users;
 CREATE POLICY "Users profiles are viewable by everyone"
     ON public.users FOR SELECT
     USING (true);
 
+DROP POLICY IF EXISTS "Users can create their own profile" ON public.users;
 CREATE POLICY "Users can create their own profile"
     ON public.users FOR INSERT
     WITH CHECK (auth.uid() = id);
 
+DROP POLICY IF EXISTS "Users can update their own profile" ON public.users;
 CREATE POLICY "Users can update their own profile"
     ON public.users FOR UPDATE
     USING (auth.uid() = id)
     WITH CHECK (auth.uid() = id);
 
 -- 6.2 Workers Policies
+DROP POLICY IF EXISTS "Worker profiles are viewable by everyone" ON public.workers;
 CREATE POLICY "Worker profiles are viewable by everyone"
     ON public.workers FOR SELECT
     USING (true);
 
+DROP POLICY IF EXISTS "Users can create their worker profile" ON public.workers;
 CREATE POLICY "Users can create their worker profile"
     ON public.workers FOR INSERT
     WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Workers can update their worker profile" ON public.workers;
 CREATE POLICY "Workers can update their worker profile"
     ON public.workers FOR UPDATE
     USING (auth.uid() = user_id)
     WITH CHECK (auth.uid() = user_id);
 
 -- 6.3 Skills & Worker Skills Policies
+DROP POLICY IF EXISTS "Skills catalog is viewable by everyone" ON public.skills;
 CREATE POLICY "Skills catalog is viewable by everyone"
     ON public.skills FOR SELECT
     USING (true);
 
+DROP POLICY IF EXISTS "Worker skills are viewable by everyone" ON public.worker_skills;
 CREATE POLICY "Worker skills are viewable by everyone"
     ON public.worker_skills FOR SELECT
     USING (true);
 
+DROP POLICY IF EXISTS "Workers can manage their own skills" ON public.worker_skills;
 CREATE POLICY "Workers can manage their own skills"
     ON public.worker_skills FOR ALL
     USING (
@@ -281,19 +309,23 @@ CREATE POLICY "Workers can manage their own skills"
     );
 
 -- 6.4 Service Requests Policies
+DROP POLICY IF EXISTS "Customers can view their own requests" ON public.service_requests;
 CREATE POLICY "Customers can view their own requests"
     ON public.service_requests FOR SELECT
     USING (auth.uid() = customer_id);
 
+DROP POLICY IF EXISTS "Customers can insert their own requests" ON public.service_requests;
 CREATE POLICY "Customers can insert their own requests"
     ON public.service_requests FOR INSERT
     WITH CHECK (auth.uid() = customer_id);
 
+DROP POLICY IF EXISTS "Customers can update their own requests" ON public.service_requests;
 CREATE POLICY "Customers can update their own requests"
     ON public.service_requests FOR UPDATE
     USING (auth.uid() = customer_id);
 
 -- 6.5 Bookings Policies
+DROP POLICY IF EXISTS "Participants can view their bookings" ON public.bookings;
 CREATE POLICY "Participants can view their bookings"
     ON public.bookings FOR SELECT
     USING (
@@ -305,10 +337,12 @@ CREATE POLICY "Participants can view their bookings"
         )
     );
 
+DROP POLICY IF EXISTS "Customers can create bookings" ON public.bookings;
 CREATE POLICY "Customers can create bookings"
     ON public.bookings FOR INSERT
     WITH CHECK (auth.uid() = customer_id);
 
+DROP POLICY IF EXISTS "Participants can update booking status" ON public.bookings;
 CREATE POLICY "Participants can update booking status"
     ON public.bookings FOR UPDATE
     USING (
@@ -320,19 +354,22 @@ CREATE POLICY "Participants can update booking status"
         )
     );
 
--- 6.6 Reviews Policies
+-- 6.6 Reviews Policies (Strengthened & Hardened)
+DROP POLICY IF EXISTS "Reviews are viewable by everyone" ON public.reviews;
 CREATE POLICY "Reviews are viewable by everyone"
     ON public.reviews FOR SELECT
     USING (true);
 
+DROP POLICY IF EXISTS "Customers can add review for completed bookings" ON public.reviews;
 CREATE POLICY "Customers can add review for completed bookings"
     ON public.reviews FOR INSERT
     WITH CHECK (
         auth.uid() = customer_id
         AND EXISTS (
-            SELECT 1 FROM public.bookings
-            WHERE bookings.id = reviews.booking_id
-              AND bookings.customer_id = auth.uid()
-              AND bookings.status = 'completed'
+            SELECT 1 FROM public.bookings b
+            WHERE b.id = reviews.booking_id
+              AND b.customer_id = auth.uid()
+              AND b.worker_id = reviews.worker_id
+              AND b.status = 'completed'
         )
     );
