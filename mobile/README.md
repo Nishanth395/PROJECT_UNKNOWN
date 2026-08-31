@@ -1,6 +1,6 @@
 # Mobile Module (Flutter Cross-Platform Client)
 
-Flutter cross-platform mobile client for **Project Unknown** providing the end-to-end Customer workflow: authentication, problem description, AI requirement extraction, and deterministic PostGIS worker matching.
+Flutter cross-platform mobile client for **Project Unknown** providing the end-to-end Customer workflow: authentication, problem description, real GPS & manual location detection, AI requirement extraction, and deterministic PostGIS worker matching.
 
 ---
 
@@ -8,6 +8,10 @@ Flutter cross-platform mobile client for **Project Unknown** providing the end-t
 
 ```text
 mobile/
+├── android/
+│   └── app/src/main/AndroidManifest.xml # ACCESS_FINE_LOCATION & ACCESS_COARSE_LOCATION
+├── ios/
+│   └── Runner/Info.plist                # NSLocationWhenInUseUsageDescription
 ├── lib/
 │   ├── main.dart             # App entrypoint, Supabase init, MultiProvider, AuthGate
 │   ├── core/
@@ -23,13 +27,16 @@ mobile/
 │   │   ├── user_profile.dart     # Customer profile model
 │   │   ├── service_request.dart  # Service request data model
 │   │   ├── service_extraction.dart # AI requirement classification model
-│   │   └── worker_match.dart     # Ranked worker item & matching response
+│   │   ├── worker_match.dart     # Ranked worker item & matching response
+│   │   └── location_data.dart    # LocationDataModel & coordinate validation
 │   ├── services/
 │   │   ├── auth_service.dart     # Supabase Auth operations & profile sync
+│   │   ├── location_service.dart # Geolocator wrapper, GPS acquisition & settings
 │   │   ├── service_request_api.dart # CRUD & AI extraction endpoints
 │   │   └── matching_api.dart     # Deterministic worker matching endpoint
 │   ├── providers/
 │   │   ├── auth_provider.dart    # Session & user auth state management
+│   │   ├── location_provider.dart # GPS state, manual fallback & permissions
 │   │   ├── request_provider.dart # Request creation & AI classification state
 │   │   └── matching_provider.dart # Worker matching results state
 │   ├── screens/
@@ -39,8 +46,8 @@ mobile/
 │   │   ├── home/
 │   │   │   └── home_screen.dart    # Welcome banner & primary problem CTA
 │   │   ├── requests/
-│   │   │   ├── create_request_screen.dart # Description, Urgency & GPS inputs
-│   │   │   ├── request_detail_screen.dart # Status, AI classification & intent
+│   │   │   ├── create_request_screen.dart # Description, Urgency, GPS & manual location
+│   │   │   ├── request_detail_screen.dart # Status, GPS coordinates & AI intent
 │   │   │   └── my_requests_screen.dart    # Historical requests list
 │   │   └── matches/
 │   │       └── worker_matches_screen.dart # Ranked worker list & details
@@ -52,7 +59,12 @@ mobile/
 │   ├── models/
 │   │   ├── service_request_test.dart
 │   │   ├── service_extraction_test.dart
-│   │   └── worker_match_test.dart
+│   │   ├── worker_match_test.dart
+│   │   └── location_data_test.dart
+│   ├── services/
+│   │   └── location_service_test.dart
+│   ├── providers/
+│   │   └── location_provider_test.dart
 │   └── core/
 │       └── api_exceptions_test.dart
 ├── pubspec.yaml
@@ -62,7 +74,21 @@ mobile/
 
 ---
 
-## 📱 Complete Customer User Flow (Phase 5A)
+## 📍 Real Location Support (Phase 5B)
+
+### 1. Location Modes Supported
+* **Option A: "Use my current location" (GPS Auto)**
+  * Checks device location services (GPS enabled).
+  * Requests foreground location permission (`ACCESS_FINE_LOCATION`).
+  * Fetches high-accuracy GPS coordinates with a 12-second timeout and fallback.
+  * Handles permission states: `granted`, `denied`, `deniedForever` (with direct "Open App Settings" action), and `serviceDisabled`.
+* **Option B: "Manual Coordinates / Select location manually"**
+  * Allows typing exact `Latitude` ($-90 \le \text{lat} \le 90$) and `Longitude` ($-180 \le \text{lon} \le 180$) with strict client-side validation.
+  * Includes a 1-tap **"Bengaluru Demo"** preset (`12.9716, 77.5946`) for instant emulator and development testing.
+
+---
+
+## 📱 Complete Customer User Flow
 
 ```text
 1. Authentication (Login / Sign Up)
@@ -73,40 +99,44 @@ mobile/
    - Primary CTA: "Describe your problem"
    - Secondary: "My Requests"
        ↓
-3. Create Service Request
+3. Create Service Request & Real Location
    - Problem description (e.g. "Kitchen PVC pipe is leaking heavily")
    - Urgency selector (Low / Normal / High / Emergency)
-   - GPS coordinates & address
+   - GPS Auto detection OR Manual Latitude/Longitude validation
        ↓ (POST /api/v1/service-requests)
 4. Request Detail & AI Intent Classification
-   - Displays submitted request overview.
+   - Displays submitted request with exact GPS Coordinates (lat, lon).
    - Triggers AI extraction (POST /api/v1/service-requests/{id}/extract)
    - Renders detected domain (e.g. "Plumbing"), canonical skills ("Pipe Repair", "Leak Fixing"), and confidence score.
        ↓
-5. Deterministic Worker Matching
+5. Deterministic PostGIS Worker Matching
    - Calls GET /api/v1/service-requests/{id}/matches
-   - Displays ranked worker cards with proximity, rating, verified badge, and match score out of 100.
+   - Displays ranked worker cards with proximity (in km), rating, verified badge, and match score out of 100%.
 ```
 
 ---
 
 ## ⚙️ Configuration & Environment
 
-The app uses `AppConfig` with smart platform defaults and supports compile-time environment flags:
+### Android Emulator Setup
+1. In Android Studio Emulator Extended Controls ($\dots$), open the **Location** tab.
+2. Enter coordinates for Bengaluru:
+   * **Latitude**: `12.9500`
+   * **Longitude**: `77.6300`
+3. Click **"Save Point"** and **"Set Location"**.
+4. Tap **"Use My Location"** in the app to acquire this position.
 
+### Physical Device Setup
 ```bash
-# Run on Android Emulator (default points to http://10.0.2.2:8000)
-flutter run
-
-# Run on Physical Device or custom Backend IP
-flutter run --dart-define=API_BASE_URL=http://192.168.1.100:8000
+# Run on physical device connected to your local WiFi network
+flutter run --dart-define=API_BASE_URL=http://<YOUR_LOCAL_IP>:8000
 ```
 
 ---
 
 ## 🧪 Testing
 
-Run automated model and API exception tests:
+Run automated tests:
 
 ```bash
 cd mobile
