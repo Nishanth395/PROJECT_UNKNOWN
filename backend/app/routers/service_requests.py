@@ -12,7 +12,9 @@ from app.schemas.service_request import (
     ServiceRequestListResponse,
     RequestStatus,
 )
+from app.schemas.ai import ExtractionResponse
 from app.services.service_request_service import ServiceRequestService
+from app.ai.service import AIExtractionService
 
 router = APIRouter(prefix="/service-requests", tags=["Service Requests"])
 
@@ -102,3 +104,25 @@ def get_service_request(
             },
         )
     return record
+
+
+@router.post(
+    "/{request_id}/extract",
+    response_model=ExtractionResponse,
+    summary="Extract Service Requirements via AI",
+    description="Analyzes the natural language description of a service request and extracts canonical category and skills.",
+)
+async def extract_service_request_requirements(
+    request_id: UUID,
+    current_user: User = Depends(require_customer),
+    db: Session = Depends(get_db),
+) -> ExtractionResponse:
+    """
+    Executes AI requirements extraction for a customer's service request.
+    Validates output against public.skills and updates the database record.
+    """
+    return await AIExtractionService.extract_and_update_request(
+        db=db,
+        request_id=request_id,
+        customer_id=current_user.id,
+    )

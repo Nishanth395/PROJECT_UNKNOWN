@@ -13,6 +13,7 @@ from app.schemas.service_request import (
     UrgencyLevel,
     RequestStatus,
 )
+from app.schemas.ai import ServiceRequirementExtraction, ExtractionResponse, ExtractionUrgency
 
 __all__ = [
     "HealthResponse",
@@ -33,4 +34,7 @@ __all__ = [
     "ServiceRequestListResponse",
     "UrgencyLevel",
     "RequestStatus",
+    "ServiceRequirementExtraction",
+    "ExtractionResponse",
+    "ExtractionUrgency",
 ]

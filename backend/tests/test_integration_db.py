@@ -108,7 +108,7 @@ def test_live_worker_detail_lookup(live_client: TestClient):
 
 @live_db_required
 def test_live_service_request_lifecycle(live_client: TestClient):
-    """Verify service request creation and PostGIS geography storage in live PostgreSQL database."""
+    """Verify service request creation, AI requirement extraction, and PostGIS geography in live PostgreSQL database."""
     db = SessionLocal()
     existing_user = db.query(User).first()
     if not existing_user:
@@ -164,6 +164,21 @@ def test_live_service_request_lifecycle(live_client: TestClient):
         get_res = live_client.get(f"/service-requests/{created_request_id}", headers=headers)
         assert get_res.status_code == 200
         assert get_res.json()["id"] == created_request_id
+
+        # 4. POST /service-requests/{id}/extract (AI Intent Extraction)
+        extract_res = live_client.post(f"/service-requests/{created_request_id}/extract", headers=headers)
+        assert extract_res.status_code == 200
+        extract_data = extract_res.json()
+        assert extract_data["request_id"] == created_request_id
+        assert extract_data["category"] == "Plumbing"
+        assert len(extract_data["skills"]) >= 1
+        assert "Pipe Repair" in extract_data["skills"] or "Leak Fixing" in extract_data["skills"]
+        assert extract_data["confidence"] >= 0.7
+
+        # 5. Verify database record has updated extracted columns in PostgreSQL
+        updated_record = db.query(ServiceRequest).filter(ServiceRequest.id == uuid.UUID(created_request_id)).first()
+        assert updated_record.extracted_category == "Plumbing"
+        assert "Pipe Repair" in updated_record.extracted_skills or "Leak Fixing" in updated_record.extracted_skills
 
     finally:
         # Cleanup created records and restore user role
