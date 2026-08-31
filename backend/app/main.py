@@ -5,7 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.config import settings
-from app.routers import health, skills, workers
+from app.routers import health, skills, workers, auth
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -58,6 +58,9 @@ app.include_router(skills.router, prefix=settings.API_V1_PREFIX)
 
 app.include_router(workers.router)
 app.include_router(workers.router, prefix=settings.API_V1_PREFIX)
+
+app.include_router(auth.router)
+app.include_router(auth.router, prefix=settings.API_V1_PREFIX)
 
 
 @app.get("/", tags=["Root"])
