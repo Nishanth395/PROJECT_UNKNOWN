@@ -1,13 +1,13 @@
 -- ==============================================================================
--- PROJECT UNKNOWN - DATABASE SCHEMA (CORRECTED & APPROVED)
+-- PROJECT UNKNOWN - DATABASE SCHEMA (SUPABASE POSTGIS COMPATIBLE)
 -- ==============================================================================
--- Database: PostgreSQL 15+ with PostGIS
+-- Database: PostgreSQL 15+ with PostGIS installed in 'extensions' schema
 -- Identity Provider: Supabase Auth (auth.users)
 -- ==============================================================================
 
 -- 1. EXTENSIONS
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "postgis";
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA extensions;
+CREATE EXTENSION IF NOT EXISTS "postgis" WITH SCHEMA extensions;
 
 -- ------------------------------------------------------------------------------
 -- 2. CONTROLLED ENUMS / TYPE DEFINITIONS
@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS public.workers (
     is_available BOOLEAN NOT NULL DEFAULT TRUE,
     is_verified BOOLEAN NOT NULL DEFAULT FALSE,
     service_radius_km NUMERIC(5, 2) NOT NULL DEFAULT 15.00 CHECK (service_radius_km > 0),
-    location GEOGRAPHY(Point, 4326) NOT NULL,
+    location extensions.geography(Point, 4326) NOT NULL,
     address_text TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS public.service_requests (
     extracted_category TEXT,
     extracted_skills TEXT[] DEFAULT '{}',
     urgency urgency_level NOT NULL DEFAULT 'normal',
-    location GEOGRAPHY(Point, 4326) NOT NULL,
+    location extensions.geography(Point, 4326) NOT NULL,
     address_text TEXT,
     status request_status NOT NULL DEFAULT 'open',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

@@ -1,6 +1,6 @@
 # Database Module (PostgreSQL + PostGIS + Supabase)
 
-This directory contains the database schema, spatial indexing setup, canonical reference seeds, and development worker datasets for **Project Unknown**.
+This directory contains the database schema, spatial indexing setup, canonical reference seeds, and development worker datasets for **Project Unknown**, explicitly compatible with PostGIS installed in Supabase's `extensions` schema.
 
 ---
 
@@ -8,17 +8,65 @@ This directory contains the database schema, spatial indexing setup, canonical r
 
 ```text
 database/
-├── schema.sql         # DDL table definitions, enums, triggers, PostGIS indexes, and RLS policies
+├── schema.sql         # DDL table definitions, PostGIS geography columns, enums, triggers, and RLS
 ├── seed.sql           # Canonical skills reference seed (100% Auth-independent)
-├── demo-workers.sql   # Demo worker profiles & skill mappings (Requires Supabase Auth users)
-└── README.md          # Setup sequence, verification queries, and schema documentation
+├── demo-workers.sql   # Demo worker profiles & skill mappings (Explicitly linked to real Auth users)
+└── README.md          # Setup sequence, verification queries, and PostGIS query examples
+```
+
+---
+
+## 🌍 PostGIS Schema & Spatial Queries
+
+PostGIS is installed under Supabase's standard `extensions` schema (PostGIS version 3.3.7+).
+
+* **Column Definition**:
+  ```sql
+  location extensions.geography(Point, 4326) NOT NULL
+  ```
+* **GiST Spatial Indexing**:
+  ```sql
+  CREATE INDEX IF NOT EXISTS idx_workers_location ON public.workers USING GIST (location);
+  CREATE INDEX IF NOT EXISTS idx_service_requests_location ON public.service_requests USING GIST (location);
+  ```
+
+### Example: "Find available electricians within 5 km of user coordinates"
+*(Given user location: Longitude `77.6300`, Latitude `12.9500`)*
+
+```sql
+SELECT 
+    w.id AS worker_id,
+    u.full_name,
+    u.phone,
+    w.hourly_rate,
+    w.rating,
+    w.total_reviews,
+    w.address_text,
+    ROUND(
+        (extensions.ST_Distance(
+            w.location, 
+            extensions.ST_SetSRID(extensions.ST_MakePoint(77.6300, 12.9500), 4326)::extensions.geography
+        ) / 1000.0)::numeric, 
+        2
+    ) AS distance_km
+FROM public.workers w
+JOIN public.users u ON w.user_id = u.id
+JOIN public.worker_skills ws ON w.id = ws.worker_id
+JOIN public.skills s ON ws.skill_id = s.id
+WHERE s.category = 'Electrical'
+  AND w.is_available = TRUE
+  AND extensions.ST_DWithin(
+      w.location, 
+      extensions.ST_SetSRID(extensions.ST_MakePoint(77.6300, 12.9500), 4326)::extensions.geography, 
+      5000 -- 5000 meters = 5 km
+  )
+GROUP BY w.id, u.full_name, u.phone, w.hourly_rate, w.rating, w.total_reviews, w.address_text, w.location
+ORDER BY distance_km ASC;
 ```
 
 ---
 
 ## ⚙️ Complete Setup Sequence
-
-To maintain **100% foreign key integrity** with Supabase Auth (`public.users.id → auth.users.id`) without bypassing or manipulating internal auth tables:
 
 ### Step A: Run `schema.sql`
 In the **Supabase Dashboard → SQL Editor** (or via `psql`), execute [`schema.sql`](schema.sql) to create all tables, PostGIS extensions, triggers, indexes, and Row-Level Security policies.
@@ -72,15 +120,15 @@ Run the verification queries below to ensure data integrity.
 
 ## 🔍 Database Integrity Verification SQL
 
-Run this script in the Supabase SQL Editor to verify that all constraints and relationships are satisfied:
+Run this script in the Supabase SQL Editor to verify that all constraints, PostGIS indexes, and relationships are satisfied:
 
 ```sql
--- 1. Check Canonical Skills Count
+-- 1. Check Canonical Skills Count (Expected: 14 skills across 6 categories)
 SELECT COUNT(*) AS total_skills, 
        COUNT(DISTINCT category) AS total_categories 
 FROM public.skills;
 
--- 2. Check Workers Count
+-- 2. Check Workers Count (Expected: 10 workers)
 SELECT COUNT(*) AS total_workers,
        COUNT(*) FILTER (WHERE is_available = TRUE) AS available_workers,
        COUNT(*) FILTER (WHERE is_verified = TRUE) AS verified_workers
@@ -121,15 +169,3 @@ LEFT JOIN public.worker_skills ws ON w.id = ws.worker_id
 LEFT JOIN public.skills s ON ws.skill_id = s.id
 GROUP BY w.id, u.full_name, u.email, w.hourly_rate, w.rating, w.total_reviews, w.address_text;
 ```
-
----
-
-## 🏛️ Schema Summary & Relationships
-
-* **`users`**: Extends `auth.users(id)` 1-to-1 (`id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE`).
-* **`workers`**: Extends `users(id)` 1-to-1 (`user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE`).
-* **`skills`**: Canonical skill repository (`name UNIQUE`, `category`).
-* **`worker_skills`**: Many-to-many (`UNIQUE(worker_id, skill_id)`), stores skill-specific `experience_years`.
-* **`service_requests`**: Stores customer problem descriptions with PostGIS points (`Point, 4326`) and `extracted_skills TEXT[]`.
-* **`bookings`**: Transactional records (`customer_id`, `worker_id`, `scheduled_time`, `status`).
-* **`reviews`**: One review per booking (`booking_id UNIQUE`), automatically recalculates `workers.rating` and `workers.total_reviews` via trigger.

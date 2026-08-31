@@ -34,7 +34,7 @@ SELECT
     u.id,
     'Senior plumber with 9+ years experience in pipe bursts, bathroom water leakage, and sanitary fittings.',
     9.0, 350.00, 4.85, 48, TRUE, TRUE, 12.00,
-    ST_SetSRID(ST_MakePoint(77.6408, 12.9784), 4326)::geography,
+    extensions.ST_SetSRID(extensions.ST_MakePoint(77.6408, 12.9784), 4326)::extensions.geography,
     '100ft Road, Indiranagar, Bengaluru'
 FROM public.users u
 WHERE u.email = 'ramesh.kumar@example.com'
@@ -50,7 +50,7 @@ SELECT
     u.id,
     'Licensed electrician specializing in emergency short circuit repair, home rewiring, and switchboards.',
     7.5, 400.00, 4.90, 62, TRUE, TRUE, 15.00,
-    ST_SetSRID(ST_MakePoint(77.6245, 12.9352), 4326)::geography,
+    extensions.ST_SetSRID(extensions.ST_MakePoint(77.6245, 12.9352), 4326)::extensions.geography,
     '5th Block, Koramangala, Bengaluru'
 FROM public.users u
 WHERE u.email = 'suresh.patil@example.com'
@@ -66,7 +66,7 @@ SELECT
     u.id,
     'Certified appliance technician for split/inverter AC gas charging, coil cleaning, and washing machine repair.',
     6.0, 500.00, 4.75, 34, TRUE, TRUE, 10.00,
-    ST_SetSRID(ST_MakePoint(77.6446, 12.9121), 4326)::geography,
+    extensions.ST_SetSRID(extensions.ST_MakePoint(77.6446, 12.9121), 4326)::extensions.geography,
     'Sector 3, HSR Layout, Bengaluru'
 FROM public.users u
 WHERE u.email = 'priya.sharma@example.com'
@@ -82,7 +82,7 @@ SELECT
     u.id,
     'Expert carpenter in flat-pack furniture assembly, door lock fixing, and modular cabinet repairs.',
     11.0, 450.00, 4.80, 51, TRUE, TRUE, 15.00,
-    ST_SetSRID(ST_MakePoint(77.5938, 12.9250), 4326)::geography,
+    extensions.ST_SetSRID(extensions.ST_MakePoint(77.5938, 12.9250), 4326)::extensions.geography,
     '4th Block, Jayanagar, Bengaluru'
 FROM public.users u
 WHERE u.email = 'amit.verma@example.com'
@@ -98,7 +98,7 @@ SELECT
     u.id,
     'Rapid response mechanic for two-wheeler breakdown, car jumpstart service, and emergency assistance.',
     5.0, 300.00, 4.65, 29, TRUE, TRUE, 15.00,
-    ST_SetSRID(ST_MakePoint(77.7500, 12.9698), 4326)::geography,
+    extensions.ST_SetSRID(extensions.ST_MakePoint(77.7500, 12.9698), 4326)::extensions.geography,
     'ITPL Main Road, Whitefield, Bengaluru'
 FROM public.users u
 WHERE u.email = 'rajesh.nair@example.com'
@@ -114,7 +114,7 @@ SELECT
     u.id,
     'Experienced mathematics tutor offering personal coaching in high school algebra, geometry, and calculus.',
     8.0, 600.00, 4.95, 41, TRUE, TRUE, 8.00,
-    ST_SetSRID(ST_MakePoint(77.5643, 13.0031), 4326)::geography,
+    extensions.ST_SetSRID(extensions.ST_MakePoint(77.5643, 13.0031), 4326)::extensions.geography,
     '8th Cross, Malleshwaram, Bengaluru'
 FROM public.users u
 WHERE u.email = 'sunita.rao@example.com'
@@ -130,7 +130,7 @@ SELECT
     u.id,
     'Prompt technician for switchboard maintenance, fan fittings, and home electrical problem diagnosis.',
     4.5, 300.00, 4.60, 22, TRUE, TRUE, 10.00,
-    ST_SetSRID(ST_MakePoint(77.6101, 12.9166), 4326)::geography,
+    extensions.ST_SetSRID(extensions.ST_MakePoint(77.6101, 12.9166), 4326)::extensions.geography,
     'BTM 2nd Stage, Bengaluru'
 FROM public.users u
 WHERE u.email = 'manoj.joshi@example.com'
@@ -146,7 +146,7 @@ SELECT
     u.id,
     'Specialist in bathroom fixtures, drain unblocking, and tap/faucet replacement.',
     6.5, 350.00, 4.70, 38, TRUE, TRUE, 12.00,
-    ST_SetSRID(ST_MakePoint(77.6066, 12.9756), 4326)::geography,
+    extensions.ST_SetSRID(extensions.ST_MakePoint(77.6066, 12.9756), 4326)::extensions.geography,
     'Brigade Road / MG Road Area, Bengaluru'
 FROM public.users u
 WHERE u.email = 'deepa.patel@example.com'
@@ -162,7 +162,7 @@ SELECT
     u.id,
     'Experienced technician for washing machine motors, drum repair, and home appliance maintenance.',
     5.5, 450.00, 4.60, 26, TRUE, TRUE, 12.00,
-    ST_SetSRID(ST_MakePoint(77.6974, 12.9591), 4326)::geography,
+    extensions.ST_SetSRID(extensions.ST_MakePoint(77.6974, 12.9591), 4326)::extensions.geography,
     'Outer Ring Road, Marathahalli, Bengaluru'
 FROM public.users u
 WHERE u.email = 'vikram.singh@example.com'
@@ -178,7 +178,7 @@ SELECT
     u.id,
     'Passionate math educator specializing in foundational concepts and exam preparation for middle and high school.',
     4.0, 500.00, 4.80, 19, TRUE, TRUE, 8.00,
-    ST_SetSRID(ST_MakePoint(77.5562, 12.9982), 4326)::geography,
+    extensions.ST_SetSRID(extensions.ST_MakePoint(77.5562, 12.9982), 4326)::extensions.geography,
     '1st Block, Rajajinagar, Bengaluru'
 FROM public.users u
 WHERE u.email = 'ananya.mukherjee@example.com'
