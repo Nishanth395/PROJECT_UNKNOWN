@@ -17,11 +17,11 @@ backend/
 │   │   ├── database.py     # SQLAlchemy sessionmaker & get_db dependency
 │   │   └── models.py       # SQLAlchemy ORM entity definitions
 │   ├── routers/
-│   │   ├── health.py       # GET /health
+│   │   ├── health.py       # GET /health, GET /health/db
 │   │   ├── skills.py       # GET /skills, GET /skills/grouped
 │   │   └── workers.py      # GET /workers, GET /workers/{worker_id}
 │   ├── schemas/
-│   │   ├── common.py       # Health and standard error response models
+│   │   ├── common.py       # Health, Database Health, and standard error response models
 │   │   ├── skill.py        # Skill response and grouping schemas
 │   │   └── worker.py       # Worker summary and detail schemas
 │   └── services/
@@ -29,9 +29,10 @@ backend/
 │       └── worker_service.py # Worker filtering and profile detail lookups
 ├── tests/
 │   ├── conftest.py         # In-memory test DB fixtures and TestClient
-│   ├── test_health.py      # Health endpoint tests
+│   ├── test_health.py      # Health & DB ping endpoint tests
 │   ├── test_skills.py      # Skills endpoint tests
-│   └── test_workers.py     # Worker listing, pagination, filtering, and 404 tests
+│   ├── test_workers.py     # Worker listing, pagination, filtering, and 404 tests
+│   └── test_integration_db.py # Integration test suite against live Supabase PostgreSQL
 ├── requirements.txt        # Python package dependencies
 └── README.md
 ```
@@ -85,7 +86,11 @@ uvicorn app.main:app --reload --port 8000
 
 ### 3. Running Automated Tests
 ```bash
+# Run unit test suite
 pytest -v
+
+# Run live database integration tests
+pytest tests/test_integration_db.py -v
 ```
 
 ---
@@ -95,6 +100,8 @@ pytest -v
 ### 1. Health Checks
 * `GET /health` or `GET /api/v1/health`
   * Returns `{ "status": "ok", "service": "project-unknown-backend" }`
+* `GET /health/db` or `GET /api/v1/health/db`
+  * Returns `{ "status": "ok", "database": "connected" }`
 
 ### 2. Skills Catalogue
 * `GET /skills` (or `/api/v1/skills`)

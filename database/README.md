@@ -11,7 +11,7 @@ database/
 ├── schema.sql         # DDL table definitions, PostGIS geography columns, enums, triggers, and RLS
 ├── seed.sql           # Canonical skills reference seed (100% Auth-independent)
 ├── demo-workers.sql   # Demo worker profiles & skill mappings (Explicitly linked to real Auth users)
-└── README.md          # Setup sequence, verification queries, and PostGIS query examples
+└── README.md          # Setup sequence, verification queries, PostGIS queries & integration testing
 ```
 
 ---
@@ -115,6 +115,23 @@ Run [`demo-workers.sql`](demo-workers.sql) to link the 10 worker profiles and th
 
 ### Step F: Run Verification Queries
 Run the verification queries below to ensure data integrity.
+
+---
+
+## 🧪 Running Database Integration Tests Safely
+
+Integration tests are decoupled from default unit tests and are executed against the development database when `DATABASE_URL` is configured in `.env`.
+
+### Safety Guidelines:
+1. **Never run integration tests against Production**.
+2. Integration tests perform **read-only queries** (`GET /health/db`, `GET /skills`, `GET /workers`, `GET /workers/{id}`).
+3. Credentials should reside strictly in `.env` (ignored by Git) and must never be committed.
+
+### To Execute Integration Tests:
+```bash
+cd backend
+pytest tests/test_integration_db.py -v
+```
 
 ---
 

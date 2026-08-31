@@ -1,4 +1,5 @@
 import uuid
+import json
 from datetime import datetime, timezone
 from sqlalchemy import (
     Column,
@@ -11,7 +12,11 @@ from sqlalchemy import (
     ForeignKey,
     UniqueConstraint,
     Uuid,
+    TypeDecorator,
+    Enum as SAEnum,
 )
+from sqlalchemy.dialects.postgresql import ARRAY
+from geoalchemy2 import Geography
 from sqlalchemy.orm import relationship
 from app.db.database import Base
 
@@ -19,6 +24,59 @@ from app.db.database import Base
 def get_utc_now():
     return datetime.now(timezone.utc)
 
+
+class PointGeographyType(TypeDecorator):
+    """
+    Cross-database Geography Point type:
+    Uses native PostGIS Geography(POINT, 4326) on PostgreSQL,
+    and falls back gracefully to Text for in-memory SQLite test suites.
+    """
+    impl = Text
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(Geography(geometry_type="POINT", srid=4326, spatial_index=False))
+        return dialect.type_descriptor(Text)
+
+
+class TextArrayType(TypeDecorator):
+    """
+    Cross-database Text Array type:
+    Uses native PostgreSQL ARRAY(Text) on PostgreSQL,
+    and JSON serialization fallback for SQLite test suites.
+    """
+    impl = Text
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(ARRAY(String))
+        return dialect.type_descriptor(Text)
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return []
+        if dialect.name == "postgresql":
+            return value
+        return json.dumps(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return []
+        if dialect.name == "postgresql":
+            return value
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except Exception:
+                return [value]
+        return list(value)
+
+
+# ------------------------------------------------------------------------------
+# Models
+# ------------------------------------------------------------------------------
 
 class User(Base):
     __tablename__ = "users"
@@ -28,7 +86,11 @@ class User(Base):
     phone = Column(String, nullable=True)
     email = Column(String, nullable=True)
     avatar_url = Column(String, nullable=True)
-    role = Column(String, nullable=False, default="customer")
+    role = Column(
+        SAEnum("customer", "worker", name="user_role", native_enum=True, create_type=False),
+        nullable=False,
+        default="customer",
+    )
     created_at = Column(DateTime(timezone=True), default=get_utc_now, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now, nullable=False)
 
@@ -52,6 +114,7 @@ class Worker(Base):
     is_available = Column(Boolean, default=True, nullable=False)
     is_verified = Column(Boolean, default=False, nullable=False)
     service_radius_km = Column(Numeric(5, 2), default=15.00, nullable=False)
+    location = Column(PointGeographyType, nullable=True)
     address_text = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), default=get_utc_now, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now, nullable=False)
@@ -99,9 +162,19 @@ class ServiceRequest(Base):
     customer_id = Column(Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     raw_description = Column(Text, nullable=False)
     extracted_category = Column(String, nullable=True)
-    urgency = Column(String, default="normal", nullable=False)
+    extracted_skills = Column(TextArrayType, default=list)
+    urgency = Column(
+        SAEnum("low", "normal", "high", "emergency", name="urgency_level", native_enum=True, create_type=False),
+        default="normal",
+        nullable=False,
+    )
+    location = Column(PointGeographyType, nullable=True)
     address_text = Column(String, nullable=True)
-    status = Column(String, default="open", nullable=False)
+    status = Column(
+        SAEnum("open", "matched", "booked", "completed", "cancelled", name="request_status", native_enum=True, create_type=False),
+        default="open",
+        nullable=False,
+    )
     created_at = Column(DateTime(timezone=True), default=get_utc_now, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now, nullable=False)
 
@@ -118,7 +191,11 @@ class Booking(Base):
     worker_id = Column(Uuid, ForeignKey("workers.id", ondelete="RESTRICT"), nullable=False)
     service_request_id = Column(Uuid, ForeignKey("service_requests.id", ondelete="SET NULL"), nullable=True)
     scheduled_time = Column(DateTime(timezone=True), nullable=False)
-    status = Column(String, default="pending", nullable=False)
+    status = Column(
+        SAEnum("pending", "accepted", "rejected", "cancelled", "completed", name="booking_status", native_enum=True, create_type=False),
+        default="pending",
+        nullable=False,
+    )
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=get_utc_now, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now, nullable=False)
