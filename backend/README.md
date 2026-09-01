@@ -1,6 +1,6 @@
 # Backend Module (FastAPI Modular Monolith)
 
-FastAPI backend server for **Project Unknown** providing REST APIs for service discovery, worker lookup, canonical skills catalogue, Supabase JWT authentication, customer service requests, AI requirement extraction, deterministic PostGIS worker matching, worker profile management, worker job feeds, and marketplace booking lifecycle.
+FastAPI backend server for **Project Unknown** providing REST APIs for service discovery, worker lookup, canonical skills catalogue, Supabase JWT authentication, customer service requests, AI requirement extraction, deterministic PostGIS worker matching, worker profile management, worker job feeds, and full marketplace booking & job lifecycle management.
 
 ---
 
@@ -25,7 +25,7 @@ backend/
 │   │   └── models.py       # SQLAlchemy ORM entity definitions
 │   ├── routers/
 │   │   ├── auth.py         # GET /auth/me (JWT-protected profile lookup)
-│   │   ├── bookings.py     # POST /bookings, GET /bookings/me, PATCH /bookings/{id}/status
+│   │   ├── bookings.py     # POST /bookings, GET /bookings/me, PATCH /bookings/{id}/status, /cancel, /complete
 │   │   ├── health.py       # GET /health, GET /health/db
 │   │   ├── service_requests.py # POST/GET /service-requests, POST /extract, GET /matches
 │   │   ├── skills.py       # GET /skills, GET /skills/grouped
@@ -68,6 +68,45 @@ backend/
 
 ---
 
+## 🔄 Booking Lifecycle & State Machine (Phase 8A)
+
+```text
+               ┌───────────────┐
+               │    PENDING    │
+               └──┬────┬────┬──┘
+                  │    │    │
+       Worker     │    │    │  Customer
+       Accepts    │    │    │  Cancels
+                  ▼    │    ▼
+         ┌────────────┐│  ┌────────────┐
+         │  ACCEPTED  ││  │ CANCELLED  │
+         └──┬───────┬─┘│  └────────────┘
+            │       │  │
+     Worker │       │  │ Worker
+  Completes │       │  │ Rejects
+            ▼       │  ▼
+   ┌───────────┐    │┌───────────┐
+   │ COMPLETED │    ││ REJECTED  │
+   └───────────┘    │└───────────┘
+                    │
+                    │ Customer Cancels
+                    └──────────────────► (To CANCELLED)
+```
+
+### Allowed State Transitions:
+* `pending -> accepted` (Worker)
+* `pending -> rejected` (Worker)
+* `pending -> cancelled` (Customer)
+* `accepted -> completed` (Worker)
+* `accepted -> cancelled` (Customer)
+
+### Disallowed State Transitions (Return HTTP 409 Conflict):
+* Any transition from `completed` (immutable state)
+* Any transition from `rejected` or `cancelled`
+* `accepted -> rejected` or `pending -> completed`
+
+---
+
 ## 📡 API Endpoints Reference
 
 ### 1. Health Checks (Public)
@@ -85,33 +124,7 @@ backend/
 * `PUT /workers/me/skills` — Assign or replace canonical skills with experience years
 * `GET /workers/me/feed` — Get nearby active customer service requests matching worker's skills within operating service radius
 
-#### Example Worker Feed Request & Response
-```http
-GET /api/v1/workers/me/feed?limit=20&offset=0
-Authorization: Bearer <worker_jwt>
-```
-```json
-{
-  "total_requests": 1,
-  "limit": 20,
-  "offset": 0,
-  "requests": [
-    {
-      "request_id": "e305e940-0255-46fb-a0b4-7b6bb822602e",
-      "description": "Kitchen PVC pipe is leaking under the sink",
-      "category": "Plumbing",
-      "matched_skills": ["Pipe Repair"],
-      "urgency": "high",
-      "distance_km": 3.35,
-      "created_at": "2026-09-01T08:30:00Z",
-      "status": "open",
-      "address_text": "Indiranagar, Bengaluru"
-    }
-  ]
-}
-```
-
-### 4. Marketplace Booking Bridge (Phase 7C-A)
+### 4. Marketplace Booking Lifecycle (Phase 8A)
 
 #### 1. Create Booking (Authenticated Customer Only)
 * `POST /bookings` or `POST /api/v1/bookings`
@@ -131,7 +144,7 @@ Authorization: Bearer <worker_jwt>
 * Filter by optional `status` query parameter (`pending`, `accepted`, `rejected`, `cancelled`, `completed`).
 * Customers receive their requested bookings; Workers receive jobs assigned to them.
 
-#### 3. Update Booking Status (Authenticated Worker Only)
+#### 3. Accept / Reject Booking (Authenticated Worker Only)
 * `PATCH /bookings/{booking_id}/status` or `PATCH /api/v1/bookings/{booking_id}/status`
 * Headers: `Authorization: Bearer <worker_jwt>`
 ```json
@@ -139,10 +152,17 @@ Authorization: Bearer <worker_jwt>
   "status": "accepted"
 }
 ```
-* **State Machine Rules**:
-  * Only `pending -> accepted` and `pending -> rejected` allowed.
-  * Invalid state transitions return `409 Conflict`.
-  * Accepting a booking atomically updates the associated `ServiceRequest.status` to `'booked'` within a database transaction.
+* **Atomic Synchronization**: Accepting a booking atomically updates the associated `ServiceRequest.status` from `'open'`/`'matched'` to `'booked'`.
+
+#### 4. Cancel Booking (Authenticated Customer Only)
+* `PATCH /bookings/{booking_id}/cancel` or `PATCH /api/v1/bookings/{booking_id}/cancel`
+* Headers: `Authorization: Bearer <customer_jwt>`
+* **Rollback Synchronization**: If an accepted booking is cancelled and no other accepted bookings exist for the request, `ServiceRequest.status` reverts from `'booked'` to `'matched'`/`'open'`.
+
+#### 5. Complete Booking (Authenticated Worker Only)
+* `PATCH /bookings/{booking_id}/complete` or `PATCH /api/v1/bookings/{booking_id}/complete`
+* Headers: `Authorization: Bearer <worker_jwt>`
+* **Completion Synchronization**: Transition `accepted -> completed` atomically marks both `Booking.status` and `ServiceRequest.status` as `'completed'`.
 
 ### 5. Service Requests & Matching (Authenticated Customer Only)
 * `POST /service-requests` — Create new service request

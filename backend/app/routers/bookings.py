@@ -1,6 +1,6 @@
 from typing import Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, Query, Path, status
+from fastapi import APIRouter, Depends, Query, Path, status, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -63,18 +63,85 @@ def list_my_bookings(
 @router.patch(
     "/{booking_id}/status",
     response_model=BookingResponse,
-    summary="Update Booking Status (Accept / Reject)",
-    description="Allows an assigned worker to accept or reject an incoming pending booking.",
+    summary="Update Booking Status (Accept / Reject / Cancel)",
+    description="Allows workers to accept/reject pending bookings, or customers to cancel their pending/accepted bookings.",
 )
 def update_booking_status(
     booking_id: UUID = Path(..., description="Target booking UUID"),
     data: BookingStatusUpdate = ...,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> BookingResponse:
+    if current_user.role == "customer":
+        if data.status != BookingStatus.CANCELLED:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error_code": "FORBIDDEN",
+                    "message": "Customers can only cancel bookings.",
+                },
+            )
+        return BookingService.cancel_booking(
+            db=db,
+            customer_user=current_user,
+            booking_id=booking_id,
+        )
+    elif current_user.role == "worker":
+        if data.status not in (BookingStatus.ACCEPTED, BookingStatus.REJECTED):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error_code": "FORBIDDEN",
+                    "message": "Workers can only accept or reject bookings through this endpoint. Use /complete to finish jobs.",
+                },
+            )
+        return BookingService.update_booking_status(
+            db=db,
+            worker_user=current_user,
+            booking_id=booking_id,
+            new_status=data.status,
+        )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error_code": "FORBIDDEN",
+                "message": "Unauthorized role for booking status transitions.",
+            },
+        )
+
+
+@router.patch(
+    "/{booking_id}/cancel",
+    response_model=BookingResponse,
+    summary="Cancel Booking",
+    description="Allows an authenticated customer to cancel their own pending or accepted booking.",
+)
+def cancel_booking(
+    booking_id: UUID = Path(..., description="Target booking UUID"),
+    current_customer: User = Depends(require_customer),
+    db: Session = Depends(get_db),
+) -> BookingResponse:
+    return BookingService.cancel_booking(
+        db=db,
+        customer_user=current_customer,
+        booking_id=booking_id,
+    )
+
+
+@router.patch(
+    "/{booking_id}/complete",
+    response_model=BookingResponse,
+    summary="Complete Booking",
+    description="Allows an assigned worker to mark an accepted booking as completed, synchronizing the service request.",
+)
+def complete_booking(
+    booking_id: UUID = Path(..., description="Target booking UUID"),
     current_worker: User = Depends(require_worker),
     db: Session = Depends(get_db),
 ) -> BookingResponse:
-    return BookingService.update_booking_status(
+    return BookingService.complete_booking(
         db=db,
         worker_user=current_worker,
         booking_id=booking_id,
-        new_status=data.status,
     )

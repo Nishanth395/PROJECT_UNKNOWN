@@ -21,7 +21,7 @@ class BookingCreate(BaseModel):
 
 
 class BookingStatusUpdate(BaseModel):
-    status: BookingStatus = Field(..., description="Target status ('accepted' or 'rejected')")
+    status: BookingStatus = Field(..., description="Target status ('accepted', 'rejected', or 'cancelled')")
 
 
 class BookingResponse(BaseModel):

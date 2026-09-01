@@ -257,8 +257,8 @@ class BookingService:
         new_status: BookingStatus,
     ) -> BookingResponse:
         """
-        Allows a worker to accept or reject an incoming pending booking.
-        Enforces atomic state transitions and updates related ServiceRequest to 'booked' upon acceptance.
+        Allows an assigned worker to accept or reject an incoming pending booking.
+        Enforces strict atomic state transitions and marks related ServiceRequest as 'booked' upon acceptance.
         """
         # 1. Retrieve worker profile
         worker = db.query(Worker).filter(Worker.user_id == worker_user.id).first()
@@ -295,12 +295,12 @@ class BookingService:
                 },
             )
 
-        # 3. Validate state transitions: Only 'pending' -> 'accepted' or 'pending' -> 'rejected'
+        # 3. Validate state transitions: Worker may only transition 'pending' -> 'accepted' or 'pending' -> 'rejected'
         if booking.status != "pending" or new_status not in (BookingStatus.ACCEPTED, BookingStatus.REJECTED):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
-                    "error_code": "INVALID_STATE_TRANSITION",
+                    "error_code": "INVALID_BOOKING_STATE_TRANSITION",
                     "message": f"Cannot transition booking from '{booking.status}' to '{new_status.value}'.",
                 },
             )
@@ -330,20 +330,161 @@ class BookingService:
                 # Update ServiceRequest status to 'booked' atomically
                 sr = db.query(ServiceRequest).filter(ServiceRequest.id == booking.service_request_id).first()
                 if sr:
-                    if sr.status == "booked":
+                    if sr.status in ("booked", "completed"):
                         raise HTTPException(
                             status_code=status.HTTP_409_CONFLICT,
                             detail={
                                 "error_code": "REQUEST_ALREADY_BOOKED",
-                                "message": "Service request is already marked as booked.",
+                                "message": f"Service request is already marked as '{sr.status}'.",
                             },
                         )
                     sr.status = "booked"
+                    sr.updated_at = datetime.now(timezone.utc)
 
             booking.status = "accepted"
 
         elif new_status == BookingStatus.REJECTED:
             booking.status = "rejected"
+
+        booking.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(booking)
+
+        return _format_booking_response(booking)
+
+    @staticmethod
+    def cancel_booking(
+        db: Session,
+        customer_user: User,
+        booking_id: UUID,
+    ) -> BookingResponse:
+        """
+        Allows a customer to cancel their own pending or accepted booking.
+        Reverts related ServiceRequest to 'matched' if no other accepted bookings exist.
+        """
+        # 1. Retrieve booking belonging strictly to the customer
+        booking = (
+            db.query(Booking)
+            .options(
+                joinedload(Booking.customer),
+                joinedload(Booking.worker).joinedload(Worker.user),
+                joinedload(Booking.service_request),
+            )
+            .filter(
+                Booking.id == booking_id,
+                Booking.customer_id == customer_user.id,
+            )
+            .first()
+        )
+
+        if not booking:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "error_code": "BOOKING_NOT_FOUND",
+                    "message": "Booking not found or not owned by you.",
+                },
+            )
+
+        # 2. Validate state transitions: Customer can only cancel 'pending' or 'accepted' bookings
+        if booking.status not in ("pending", "accepted"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error_code": "INVALID_BOOKING_STATE_TRANSITION",
+                    "message": f"Cannot transition booking from '{booking.status}' to 'cancelled'.",
+                },
+            )
+
+        # 3. If booking was accepted, synchronize service request
+        if booking.status == "accepted" and booking.service_request_id:
+            sr = db.query(ServiceRequest).filter(ServiceRequest.id == booking.service_request_id).first()
+            if sr and sr.status == "booked":
+                # Check if another accepted booking exists
+                other_accepted = (
+                    db.query(Booking)
+                    .filter(
+                        Booking.service_request_id == sr.id,
+                        Booking.status == "accepted",
+                        Booking.id != booking.id,
+                    )
+                    .first()
+                )
+                if not other_accepted:
+                    sr.status = "matched" if sr.extracted_skills else "open"
+                    sr.updated_at = datetime.now(timezone.utc)
+
+        booking.status = "cancelled"
+        booking.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(booking)
+
+        return _format_booking_response(booking)
+
+    @staticmethod
+    def complete_booking(
+        db: Session,
+        worker_user: User,
+        booking_id: UUID,
+    ) -> BookingResponse:
+        """
+        Allows an assigned worker to mark an accepted booking as completed.
+        Atomically updates the related ServiceRequest status to 'completed'.
+        """
+        # 1. Retrieve worker profile
+        worker = db.query(Worker).filter(Worker.user_id == worker_user.id).first()
+        if not worker:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "error_code": "WORKER_PROFILE_NOT_FOUND",
+                    "message": "Worker profile does not exist.",
+                },
+            )
+
+        # 2. Retrieve booking belonging strictly to this worker
+        booking = (
+            db.query(Booking)
+            .options(
+                joinedload(Booking.customer),
+                joinedload(Booking.worker).joinedload(Worker.user),
+                joinedload(Booking.service_request),
+            )
+            .filter(
+                Booking.id == booking_id,
+                Booking.worker_id == worker.id,
+            )
+            .first()
+        )
+
+        if not booking:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "error_code": "BOOKING_NOT_FOUND",
+                    "message": "Booking not found or not assigned to you.",
+                },
+            )
+
+        # 3. Validate state transitions: Only 'accepted' -> 'completed' is allowed
+        if booking.status != "accepted":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error_code": "BOOKING_NOT_COMPLETABLE",
+                    "message": f"Cannot complete booking in '{booking.status}' status. Only accepted bookings can be completed.",
+                },
+            )
+
+        # 4. Update booking and related service request to completed
+        booking.status = "completed"
+        booking.updated_at = datetime.now(timezone.utc)
+
+        if booking.service_request_id:
+            sr = db.query(ServiceRequest).filter(ServiceRequest.id == booking.service_request_id).first()
+            if sr:
+                sr.status = "completed"
+                sr.updated_at = datetime.now(timezone.utc)
 
         db.commit()
         db.refresh(booking)

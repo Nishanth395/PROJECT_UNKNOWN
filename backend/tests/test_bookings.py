@@ -124,6 +124,10 @@ def setup_booking_data(db_session: Session):
     db_session.commit()
 
 
+# ==============================================================================
+# BOOKING CREATION TESTS
+# ==============================================================================
+
 def test_create_booking_unauthenticated(client: TestClient):
     res = client.post("/api/v1/bookings", json={"worker_id": str(uuid.uuid4()), "service_request_id": str(uuid.uuid4())})
     assert res.status_code == 401
@@ -184,6 +188,10 @@ def test_create_booking_duplicate_rejected(client: TestClient, setup_booking_dat
     assert res2.json()["detail"]["error_code"] == "DUPLICATE_BOOKING"
 
 
+# ==============================================================================
+# BOOKING LIST SCOPING TESTS
+# ==============================================================================
+
 def test_list_bookings_customer_and_worker_scoping(client: TestClient, setup_booking_data):
     # 1. Customer 1 books Worker 1
     token_c1 = generate_test_jwt(str(setup_booking_data["customer_user1"].id))
@@ -220,6 +228,10 @@ def test_list_bookings_customer_and_worker_scoping(client: TestClient, setup_boo
     assert res_w2.status_code == 200
     assert res_w2.json()["total"] == 0
 
+
+# ==============================================================================
+# WORKER ACCEPT & REJECT TESTS
+# ==============================================================================
 
 def test_worker_accept_booking_and_updates_service_request(client: TestClient, db_session: Session, setup_booking_data):
     token_c = generate_test_jwt(str(setup_booking_data["customer_user1"].id))
@@ -292,7 +304,11 @@ def test_worker_cannot_modify_another_workers_booking(client: TestClient, setup_
     assert res_hack.status_code == 404
 
 
-def test_invalid_state_transition_returns_409(client: TestClient, setup_booking_data):
+# ==============================================================================
+# CUSTOMER CANCELLATION TESTS (Phase 8A)
+# ==============================================================================
+
+def test_customer_cancel_pending_booking(client: TestClient, setup_booking_data):
     token_c = generate_test_jwt(str(setup_booking_data["customer_user1"].id))
     res_create = client.post(
         "/api/v1/bookings",
@@ -304,19 +320,275 @@ def test_invalid_state_transition_returns_409(client: TestClient, setup_booking_
     )
     booking_id = res_create.json()["booking_id"]
 
-    token_w1 = generate_test_jwt(str(setup_booking_data["worker_user1"].id))
-    # Accept once
+    # Cancel via /cancel endpoint
+    res_cancel = client.patch(
+        f"/api/v1/bookings/{booking_id}/cancel",
+        headers={"Authorization": f"Bearer {token_c}"},
+    )
+    assert res_cancel.status_code == 200
+    assert res_cancel.json()["status"] == "cancelled"
+
+
+def test_customer_cancel_accepted_booking_and_reverts_request(client: TestClient, db_session: Session, setup_booking_data):
+    token_c = generate_test_jwt(str(setup_booking_data["customer_user1"].id))
+    token_w = generate_test_jwt(str(setup_booking_data["worker_user1"].id))
+
+    res_create = client.post(
+        "/api/v1/bookings",
+        json={
+            "worker_id": str(setup_booking_data["worker1"].id),
+            "service_request_id": str(setup_booking_data["service_request"].id),
+        },
+        headers={"Authorization": f"Bearer {token_c}"},
+    )
+    booking_id = res_create.json()["booking_id"]
+
+    # Worker accepts
     client.patch(
         f"/api/v1/bookings/{booking_id}/status",
         json={"status": "accepted"},
-        headers={"Authorization": f"Bearer {token_w1}"},
+        headers={"Authorization": f"Bearer {token_w}"},
     )
 
-    # Try to reject an already accepted booking -> 409
-    res_invalid = client.patch(
+    # Customer cancels via status endpoint
+    res_cancel = client.patch(
         f"/api/v1/bookings/{booking_id}/status",
-        json={"status": "rejected"},
-        headers={"Authorization": f"Bearer {token_w1}"},
+        json={"status": "cancelled"},
+        headers={"Authorization": f"Bearer {token_c}"},
     )
-    assert res_invalid.status_code == 409
-    assert res_invalid.json()["detail"]["error_code"] == "INVALID_STATE_TRANSITION"
+    assert res_cancel.status_code == 200
+    assert res_cancel.json()["status"] == "cancelled"
+
+    # Service request should be reverted to 'matched' (since it has extracted_skills)
+    sr = db_session.query(ServiceRequest).filter(ServiceRequest.id == setup_booking_data["service_request"].id).first()
+    assert sr.status == "matched"
+
+
+def test_customer_cannot_cancel_another_customers_booking(client: TestClient, setup_booking_data):
+    token_c1 = generate_test_jwt(str(setup_booking_data["customer_user1"].id))
+    token_c2 = generate_test_jwt(str(setup_booking_data["customer_user2"].id))
+
+    res_create = client.post(
+        "/api/v1/bookings",
+        json={
+            "worker_id": str(setup_booking_data["worker1"].id),
+            "service_request_id": str(setup_booking_data["service_request"].id),
+        },
+        headers={"Authorization": f"Bearer {token_c1}"},
+    )
+    booking_id = res_create.json()["booking_id"]
+
+    # Customer 2 attempts to cancel Customer 1's booking
+    res_cancel = client.patch(
+        f"/api/v1/bookings/{booking_id}/cancel",
+        headers={"Authorization": f"Bearer {token_c2}"},
+    )
+    assert res_cancel.status_code == 404
+
+
+def test_customer_cannot_cancel_completed_booking(client: TestClient, setup_booking_data):
+    token_c = generate_test_jwt(str(setup_booking_data["customer_user1"].id))
+    token_w = generate_test_jwt(str(setup_booking_data["worker_user1"].id))
+
+    res_create = client.post(
+        "/api/v1/bookings",
+        json={
+            "worker_id": str(setup_booking_data["worker1"].id),
+            "service_request_id": str(setup_booking_data["service_request"].id),
+        },
+        headers={"Authorization": f"Bearer {token_c}"},
+    )
+    booking_id = res_create.json()["booking_id"]
+
+    # Worker accepts then completes
+    client.patch(f"/api/v1/bookings/{booking_id}/status", json={"status": "accepted"}, headers={"Authorization": f"Bearer {token_w}"})
+    client.patch(f"/api/v1/bookings/{booking_id}/complete", headers={"Authorization": f"Bearer {token_w}"})
+
+    # Customer tries to cancel completed booking
+    res_cancel = client.patch(f"/api/v1/bookings/{booking_id}/cancel", headers={"Authorization": f"Bearer {token_c}"})
+    assert res_cancel.status_code == 409
+    assert res_cancel.json()["detail"]["error_code"] == "INVALID_BOOKING_STATE_TRANSITION"
+
+
+def test_worker_cannot_cancel_booking(client: TestClient, setup_booking_data):
+    token_c = generate_test_jwt(str(setup_booking_data["customer_user1"].id))
+    token_w = generate_test_jwt(str(setup_booking_data["worker_user1"].id))
+
+    res_create = client.post(
+        "/api/v1/bookings",
+        json={
+            "worker_id": str(setup_booking_data["worker1"].id),
+            "service_request_id": str(setup_booking_data["service_request"].id),
+        },
+        headers={"Authorization": f"Bearer {token_c}"},
+    )
+    booking_id = res_create.json()["booking_id"]
+
+    # Worker tries to call /cancel -> 403
+    res_cancel = client.patch(f"/api/v1/bookings/{booking_id}/cancel", headers={"Authorization": f"Bearer {token_w}"})
+    assert res_cancel.status_code == 403
+
+
+# ==============================================================================
+# WORKER JOB COMPLETION TESTS (Phase 8A)
+# ==============================================================================
+
+def test_worker_complete_accepted_booking_and_updates_service_request(client: TestClient, db_session: Session, setup_booking_data):
+    token_c = generate_test_jwt(str(setup_booking_data["customer_user1"].id))
+    token_w = generate_test_jwt(str(setup_booking_data["worker_user1"].id))
+
+    res_create = client.post(
+        "/api/v1/bookings",
+        json={
+            "worker_id": str(setup_booking_data["worker1"].id),
+            "service_request_id": str(setup_booking_data["service_request"].id),
+        },
+        headers={"Authorization": f"Bearer {token_c}"},
+    )
+    booking_id = res_create.json()["booking_id"]
+
+    # Worker accepts
+    client.patch(f"/api/v1/bookings/{booking_id}/status", json={"status": "accepted"}, headers={"Authorization": f"Bearer {token_w}"})
+
+    # Worker completes
+    res_complete = client.patch(f"/api/v1/bookings/{booking_id}/complete", headers={"Authorization": f"Bearer {token_w}"})
+    assert res_complete.status_code == 200
+    assert res_complete.json()["status"] == "completed"
+
+    # Verify ServiceRequest status changed to 'completed'
+    sr = db_session.query(ServiceRequest).filter(ServiceRequest.id == setup_booking_data["service_request"].id).first()
+    assert sr.status == "completed"
+
+
+def test_worker_cannot_complete_pending_booking(client: TestClient, setup_booking_data):
+    token_c = generate_test_jwt(str(setup_booking_data["customer_user1"].id))
+    token_w = generate_test_jwt(str(setup_booking_data["worker_user1"].id))
+
+    res_create = client.post(
+        "/api/v1/bookings",
+        json={
+            "worker_id": str(setup_booking_data["worker1"].id),
+            "service_request_id": str(setup_booking_data["service_request"].id),
+        },
+        headers={"Authorization": f"Bearer {token_c}"},
+    )
+    booking_id = res_create.json()["booking_id"]
+
+    # Attempt complete before accepting -> 409
+    res_comp = client.patch(f"/api/v1/bookings/{booking_id}/complete", headers={"Authorization": f"Bearer {token_w}"})
+    assert res_comp.status_code == 409
+    assert res_comp.json()["detail"]["error_code"] == "BOOKING_NOT_COMPLETABLE"
+
+
+def test_worker_cannot_complete_rejected_or_cancelled_booking(client: TestClient, setup_booking_data):
+    token_c = generate_test_jwt(str(setup_booking_data["customer_user1"].id))
+    token_w = generate_test_jwt(str(setup_booking_data["worker_user1"].id))
+
+    res_create = client.post(
+        "/api/v1/bookings",
+        json={
+            "worker_id": str(setup_booking_data["worker1"].id),
+            "service_request_id": str(setup_booking_data["service_request"].id),
+        },
+        headers={"Authorization": f"Bearer {token_c}"},
+    )
+    booking_id = res_create.json()["booking_id"]
+
+    # Worker rejects
+    client.patch(f"/api/v1/bookings/{booking_id}/status", json={"status": "rejected"}, headers={"Authorization": f"Bearer {token_w}"})
+
+    # Try to complete rejected booking -> 409
+    res_comp = client.patch(f"/api/v1/bookings/{booking_id}/complete", headers={"Authorization": f"Bearer {token_w}"})
+    assert res_comp.status_code == 409
+    assert res_comp.json()["detail"]["error_code"] == "BOOKING_NOT_COMPLETABLE"
+
+
+def test_worker_cannot_complete_already_completed_booking(client: TestClient, setup_booking_data):
+    token_c = generate_test_jwt(str(setup_booking_data["customer_user1"].id))
+    token_w = generate_test_jwt(str(setup_booking_data["worker_user1"].id))
+
+    res_create = client.post(
+        "/api/v1/bookings",
+        json={
+            "worker_id": str(setup_booking_data["worker1"].id),
+            "service_request_id": str(setup_booking_data["service_request"].id),
+        },
+        headers={"Authorization": f"Bearer {token_c}"},
+    )
+    booking_id = res_create.json()["booking_id"]
+
+    client.patch(f"/api/v1/bookings/{booking_id}/status", json={"status": "accepted"}, headers={"Authorization": f"Bearer {token_w}"})
+    client.patch(f"/api/v1/bookings/{booking_id}/complete", headers={"Authorization": f"Bearer {token_w}"})
+
+    # Try to complete again -> 409
+    res_again = client.patch(f"/api/v1/bookings/{booking_id}/complete", headers={"Authorization": f"Bearer {token_w}"})
+    assert res_again.status_code == 409
+    assert res_again.json()["detail"]["error_code"] == "BOOKING_NOT_COMPLETABLE"
+
+
+def test_customer_cannot_complete_booking(client: TestClient, setup_booking_data):
+    token_c = generate_test_jwt(str(setup_booking_data["customer_user1"].id))
+    res_comp = client.patch(f"/api/v1/bookings/{uuid.uuid4()}/complete", headers={"Authorization": f"Bearer {token_c}"})
+    assert res_comp.status_code == 403
+
+
+# ==============================================================================
+# STATE MACHINE & CONCURRENCY TESTS (Phase 8A)
+# ==============================================================================
+
+def test_all_invalid_state_transitions_return_409(client: TestClient, setup_booking_data):
+    token_c = generate_test_jwt(str(setup_booking_data["customer_user1"].id))
+    token_w = generate_test_jwt(str(setup_booking_data["worker_user1"].id))
+
+    res_create = client.post(
+        "/api/v1/bookings",
+        json={
+            "worker_id": str(setup_booking_data["worker1"].id),
+            "service_request_id": str(setup_booking_data["service_request"].id),
+        },
+        headers={"Authorization": f"Bearer {token_c}"},
+    )
+    booking_id = res_create.json()["booking_id"]
+
+    # Worker accepts
+    client.patch(f"/api/v1/bookings/{booking_id}/status", json={"status": "accepted"}, headers={"Authorization": f"Bearer {token_w}"})
+
+    # Worker tries to reject an accepted booking -> 409
+    res_inv = client.patch(f"/api/v1/bookings/{booking_id}/status", json={"status": "rejected"}, headers={"Authorization": f"Bearer {token_w}"})
+    assert res_inv.status_code == 409
+    assert res_inv.json()["detail"]["error_code"] == "INVALID_BOOKING_STATE_TRANSITION"
+
+
+def test_competing_worker_acceptance_returns_409_conflict(client: TestClient, db_session: Session, setup_booking_data):
+    # Customer creates 2 bookings for different workers on same service request
+    token_c = generate_test_jwt(str(setup_booking_data["customer_user1"].id))
+    res1 = client.post(
+        "/api/v1/bookings",
+        json={
+            "worker_id": str(setup_booking_data["worker1"].id),
+            "service_request_id": str(setup_booking_data["service_request"].id),
+        },
+        headers={"Authorization": f"Bearer {token_c}"},
+    )
+    b1_id = res1.json()["booking_id"]
+
+    res2 = client.post(
+        "/api/v1/bookings",
+        json={
+            "worker_id": str(setup_booking_data["worker2"].id),
+            "service_request_id": str(setup_booking_data["service_request"].id),
+        },
+        headers={"Authorization": f"Bearer {token_c}"},
+    )
+    b2_id = res2.json()["booking_id"]
+
+    # Worker 1 accepts b1 -> succeeds
+    token_w1 = generate_test_jwt(str(setup_booking_data["worker_user1"].id))
+    res_w1 = client.patch(f"/api/v1/bookings/{b1_id}/status", json={"status": "accepted"}, headers={"Authorization": f"Bearer {token_w1}"})
+    assert res_w1.status_code == 200
+
+    # Worker 2 tries to accept b2 on the now 'booked' request -> 409 Conflict
+    token_w2 = generate_test_jwt(str(setup_booking_data["worker_user2"].id))
+    res_w2 = client.patch(f"/api/v1/bookings/{b2_id}/status", json={"status": "accepted"}, headers={"Authorization": f"Bearer {token_w2}"})
+    assert res_w2.status_code == 409
+    assert res_w2.json()["detail"]["error_code"] == "REQUEST_ALREADY_BOOKED"
