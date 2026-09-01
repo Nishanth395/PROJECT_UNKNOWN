@@ -14,6 +14,7 @@ import {
   Briefcase,
   Layers,
   CalendarCheck,
+  CheckCircle2,
 } from "lucide-react";
 
 export function Navbar() {
@@ -93,6 +94,14 @@ export function Navbar() {
                     }`}
                   >
                     Home
+                  </Link>
+                  <Link
+                    href="/worker/jobs"
+                    className={`text-sm font-medium transition-colors hover:text-blue-600 ${
+                      pathname.startsWith("/worker/jobs") ? "text-blue-600 font-semibold" : "text-slate-600"
+                    }`}
+                  >
+                    Active Jobs
                   </Link>
                   <Link
                     href="/worker/feed"
@@ -226,6 +235,13 @@ export function Navbar() {
                     className="block py-2 text-sm font-medium text-slate-700 hover:text-blue-600"
                   >
                     Home
+                  </Link>
+                  <Link
+                    href="/worker/jobs"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="block py-2 text-sm font-medium text-slate-700 hover:text-blue-600"
+                  >
+                    Active Jobs
                   </Link>
                   <Link
                     href="/worker/feed"

@@ -5,13 +5,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/providers/auth-provider";
 import { apiClient, ApiException } from "@/lib/api/api-client";
-import { WorkerProfile, WorkerProfileUpdateInput } from "@/types/worker-profile";
+import { WorkerProfile } from "@/types/worker-profile";
 import { WorkerFeedResponse } from "@/types/worker-feed";
 import { BookingListResponse } from "@/types/booking";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { ErrorAlert } from "@/components/error-alert";
 import { JobFeedCard } from "@/components/job-feed-card";
 import { WorkerBookingCard } from "@/components/worker-booking-card";
+import { ActiveJobCard } from "@/components/active-job-card";
 import {
   Star,
   ShieldCheck,
@@ -23,6 +24,7 @@ import {
   ArrowRight,
   RefreshCw,
   Loader2,
+  CheckCircle2,
 } from "lucide-react";
 
 export default function WorkerDashboardPage() {
@@ -193,19 +195,19 @@ export default function WorkerDashboardPage() {
       {error && <ErrorAlert message={error} />}
 
       {/* Metrics Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Link
-          href="/worker/feed"
-          className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-300 hover:shadow-md space-y-1 block"
+          href="/worker/jobs"
+          className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-emerald-300 hover:shadow-md space-y-1 block"
         >
           <div className="flex items-center justify-between text-slate-500">
-            <span className="text-xs font-bold uppercase tracking-wider">Nearby Active Jobs</span>
-            <Briefcase className="h-4 w-4 text-blue-600" />
+            <span className="text-xs font-bold uppercase tracking-wider">Active Jobs</span>
+            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
           </div>
           <div className="text-3xl font-extrabold text-slate-900">
-            {feed?.total_requests ?? 0}
+            {confirmedBookings?.total ?? 0}
           </div>
-          <p className="text-xs text-slate-500">Matching your skills & radius</p>
+          <p className="text-xs text-slate-500">Confirmed in-progress</p>
         </Link>
 
         <Link
@@ -219,7 +221,21 @@ export default function WorkerDashboardPage() {
           <div className="text-3xl font-extrabold text-slate-900">
             {pendingBookings?.total ?? 0}
           </div>
-          <p className="text-xs text-slate-500">Awaiting your acceptance</p>
+          <p className="text-xs text-slate-500">Awaiting your response</p>
+        </Link>
+
+        <Link
+          href="/worker/feed"
+          className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-300 hover:shadow-md space-y-1 block"
+        >
+          <div className="flex items-center justify-between text-slate-500">
+            <span className="text-xs font-bold uppercase tracking-wider">Nearby Active Jobs</span>
+            <Briefcase className="h-4 w-4 text-blue-600" />
+          </div>
+          <div className="text-3xl font-extrabold text-slate-900">
+            {feed?.total_requests ?? 0}
+          </div>
+          <p className="text-xs text-slate-500">Matching skills & radius</p>
         </Link>
 
         <Link
@@ -227,15 +243,42 @@ export default function WorkerDashboardPage() {
           className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-purple-300 hover:shadow-md space-y-1 block"
         >
           <div className="flex items-center justify-between text-slate-500">
-            <span className="text-xs font-bold uppercase tracking-wider">Active Trade Skills</span>
+            <span className="text-xs font-bold uppercase tracking-wider">Trade Skills</span>
             <Layers className="h-4 w-4 text-purple-600" />
           </div>
           <div className="text-3xl font-extrabold text-slate-900">
             {profile?.skills?.length ?? 0}
           </div>
-          <p className="text-xs text-slate-500">Configured canonical skills</p>
+          <p className="text-xs text-slate-500">Configured catalogue</p>
         </Link>
       </div>
+
+      {/* Active Jobs in Progress Section */}
+      {confirmedBookings && confirmedBookings.items.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+              <h2 className="text-lg font-bold text-slate-900">
+                Active Engagements ({confirmedBookings.total})
+              </h2>
+            </div>
+            <Link
+              href="/worker/jobs"
+              className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1"
+            >
+              <span>View All Active Jobs</span>
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {confirmedBookings.items.map((booking) => (
+              <ActiveJobCard key={booking.booking_id} booking={booking} />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Pending Bookings Section (Action Needed) */}
       {pendingBookings && pendingBookings.items.length > 0 && (

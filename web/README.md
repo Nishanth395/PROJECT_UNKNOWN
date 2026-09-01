@@ -1,6 +1,6 @@
 # Project Unknown Web Client (Next.js App Router)
 
-Full-stack Next.js web application for **Project Unknown** providing an end-to-end customer and worker journey: Supabase Auth, natural-language problem description, browser geolocation & manual coordinates, AI requirement extraction, deterministic PostGIS worker matching, worker job feed, and full marketplace customer & worker booking lifecycle management.
+Full-stack Next.js web application for **Project Unknown** providing an end-to-end customer and worker journey: Supabase Auth, natural-language problem description, browser geolocation & manual coordinates, AI requirement extraction, deterministic PostGIS worker matching, worker job feed, customer booking flow, and worker job execution lifecycle management.
 
 ---
 
@@ -33,7 +33,11 @@ web/
 │   │           └── page.tsx   # Recommended worker cards ranked by PostGIS with Request Booking modal
 │   └── worker/
 │       ├── dashboard/
-│       │   └── page.tsx       # Worker dashboard (status, availability toggle, profile)
+│       │   └── page.tsx       # Worker dashboard (status, availability toggle, active jobs, metrics)
+│       ├── jobs/
+│       │   ├── page.tsx       # Worker active / accepted jobs list
+│       │   └── [id]/
+│       │       └── page.tsx   # Worker job detail with Complete Job execution & confirmation modal
 │       ├── onboarding/
 │       │   └── page.tsx       # Worker trade profile setup
 │       ├── skills/
@@ -49,6 +53,8 @@ web/
 ├── components/
 │   ├── navbar.tsx             # Responsive desktop/mobile header navigation (role-aware)
 │   ├── worker-card.tsx        # Ranked worker card with score, distance & Request Booking CTA
+│   ├── active-job-card.tsx    # Active in-progress job card with schedule & details link
+│   ├── job-completion-modal.tsx # Job completion confirmation dialog with PATCH /complete
 │   ├── booking-confirmation-modal.tsx # Booking confirmation dialog with date/time picker
 │   ├── customer-booking-card.tsx # Customer booking card with status badge & scheduled time
 │   ├── worker-booking-card.tsx # Worker booking card with schedule & actions
@@ -82,6 +88,7 @@ web/
 │   ├── customer-booking-flow.test.ts # Customer booking payload & model tests
 │   ├── customer-booking-components.test.tsx # WorkerCard, CustomerBookingCard, Modal tests
 │   ├── worker-flow.test.ts    # Worker status transition tests
+│   ├── worker-jobs-flow.test.tsx # ActiveJobCard & JobCompletionModal execution tests
 │   ├── worker-components.test.tsx # Worker UI component tests
 │   └── worker-card.test.tsx   # Worker card ranking tests
 ├── package.json
@@ -93,36 +100,27 @@ web/
 
 ---
 
-## 🔄 Customer Booking Journey (Phase 8B)
+## 🔄 Worker Job Execution Flow (Phase 8C)
 
 ```text
-Worker Matches (/requests/[id]/matches)
+Worker Inbound Bookings (/worker/bookings)
                   ↓
-       Click "Request Booking"
+         Click "Accept"
                   ↓
-Booking Confirmation Modal (Date/Time + Notes)
+PATCH /api/v1/bookings/{id}/status (status="accepted")
                   ↓
-POST /api/v1/bookings -> status="pending"
+Active Jobs (/worker/jobs & /worker/dashboard)
                   ↓
-  Customer Bookings (/bookings & /bookings/[id])
+Worker Job Details (/worker/jobs/[id])
                   ↓
-       [Worker Accepts / Rejects]
+        Click "Complete Job"
                   ↓
-     Accepted  ───►  Completed
-        │
-        └──────►  Cancelled (via Customer Cancellation)
+Job Completion Modal (Confirmation)
+                  ↓
+PATCH /api/v1/bookings/{id}/complete
+                  ↓
+Authoritative State Re-fetched from Backend -> status="completed"
 ```
-
-### Booking Status Definitions:
-* **`pending`**: *"Waiting for worker response"* — Worker has received the request and has not yet accepted or rejected.
-* **`accepted`**: *"Worker has accepted your request"* — Worker confirmed the appointment.
-* **`rejected`**: *"Worker declined this request"* — Worker was unavailable or declined.
-* **`cancelled`**: *"This booking was cancelled"* — Customer cancelled the pending or accepted engagement.
-* **`completed`**: *"Service completed"* — Assigned worker marked the job as successfully completed.
-
-### Customer Cancellation & 409 Conflict Handling:
-* Customers can cancel their own bookings when in `pending` or `accepted` status via `PATCH /api/v1/bookings/{id}/cancel`.
-* If a worker is no longer available or accepts another booking on the same request concurrently, the client gracefully presents: *"This worker is no longer available for this request."*
 
 ---
 
@@ -141,12 +139,12 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 ## 🧪 Testing, Linting & Build
 
 ```bash
-# Run Vitest test suite (44 tests)
+# Run Vitest test suite (50 tests)
 npm test
 
 # Run ESLint validation (0 errors, 0 warnings)
 npm run lint
 
-# Production Next.js build (15 static/dynamic routes)
+# Production Next.js build (16 static/dynamic routes)
 npm run build
 ```
