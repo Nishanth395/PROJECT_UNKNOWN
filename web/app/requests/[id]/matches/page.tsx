@@ -4,17 +4,20 @@ import React, { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { apiClient, ApiException } from "@/lib/api/api-client";
-import { WorkerMatchResponse } from "@/types/worker-match";
+import { WorkerMatchResponse, MatchedWorker } from "@/types/worker-match";
 import { WorkerCard } from "@/components/worker-card";
+import { BookingConfirmationModal } from "@/components/booking-confirmation-modal";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { ErrorAlert } from "@/components/error-alert";
-import { ArrowLeft, Users, ShieldCheck, MapPinOff, ArrowRight } from "lucide-react";
+import { ArrowLeft, Users, ShieldCheck, MapPinOff } from "lucide-react";
 
 export default function WorkerMatchesPage() {
   const params = useParams();
   const requestId = params.id as string;
 
   const [matchData, setMatchData] = useState<WorkerMatchResponse | null>(null);
+  const [selectedWorker, setSelectedWorker] = useState<MatchedWorker | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,6 +45,11 @@ export default function WorkerMatchesPage() {
       fetchMatches();
     }
   }, [requestId, fetchMatches]);
+
+  const handleRequestBooking = (worker: MatchedWorker) => {
+    setSelectedWorker(worker);
+    setIsModalOpen(true);
+  };
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8 space-y-6">
@@ -88,7 +96,12 @@ export default function WorkerMatchesPage() {
 
           <div className="space-y-4">
             {matchData.matches.map((worker, index) => (
-              <WorkerCard key={worker.worker_id} worker={worker} rank={index + 1} />
+              <WorkerCard
+                key={worker.worker_id}
+                worker={worker}
+                rank={index + 1}
+                onRequestBooking={handleRequestBooking}
+              />
             ))}
           </div>
         </div>
@@ -116,6 +129,19 @@ export default function WorkerMatchesPage() {
             </Link>
           </div>
         </div>
+      )}
+
+      {/* Booking Confirmation Modal */}
+      {selectedWorker && (
+        <BookingConfirmationModal
+          worker={selectedWorker}
+          serviceRequestId={requestId}
+          isOpen={isModalOpen}
+          onClose={() => {
+            setIsModalOpen(false);
+            setSelectedWorker(null);
+          }}
+        />
       )}
     </div>
   );

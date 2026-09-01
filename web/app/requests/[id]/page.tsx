@@ -7,7 +7,8 @@ import { useAuth } from "@/providers/auth-provider";
 import { apiClient, ApiException } from "@/lib/api/api-client";
 import { ServiceRequest } from "@/types/service-request";
 import { ExtractionResponse } from "@/types/extraction";
-import { formatStatus, formatUrgency } from "@/lib/utils";
+import { BookingListResponse, Booking } from "@/types/booking";
+import { formatStatus, formatUrgency, formatBookingStatus } from "@/lib/utils";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { ErrorAlert } from "@/components/error-alert";
 import {
@@ -22,6 +23,9 @@ import {
   FileText,
   RefreshCw,
   Cpu,
+  CalendarCheck,
+  ArrowRight,
+  UserCheck,
 } from "lucide-react";
 
 export default function RequestDetailPage() {
@@ -30,6 +34,7 @@ export default function RequestDetailPage() {
 
   const [request, setRequest] = useState<ServiceRequest | null>(null);
   const [extraction, setExtraction] = useState<ExtractionResponse | null>(null);
+  const [associatedBooking, setAssociatedBooking] = useState<Booking | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isExtracting, setIsExtracting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,16 +44,25 @@ export default function RequestDetailPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await apiClient.get<ServiceRequest>(
-        `/api/v1/service-requests/${requestId}`
-      );
-      setRequest(data);
-      if (data.extracted_category && data.extracted_skills?.length > 0) {
+      const [reqData, bookData] = await Promise.all([
+        apiClient.get<ServiceRequest>(`/api/v1/service-requests/${requestId}`),
+        apiClient
+          .get<BookingListResponse>("/api/v1/bookings/me?limit=50")
+          .catch(() => ({ total: 0, limit: 50, offset: 0, items: [] })),
+      ]);
+
+      setRequest(reqData);
+
+      // Find if this request has a booking
+      const matchingBooking = (bookData.items || []).find((b) => b.service_request_id === requestId);
+      setAssociatedBooking(matchingBooking || null);
+
+      if (reqData.extracted_category && reqData.extracted_skills?.length > 0) {
         setExtraction({
-          request_id: data.id,
-          category: data.extracted_category,
-          skills: data.extracted_skills,
-          urgency: data.urgency,
+          request_id: reqData.id,
+          category: reqData.extracted_category,
+          skills: reqData.extracted_skills,
+          urgency: reqData.urgency,
           confidence: 0.9,
           provider: "AI",
           model: "Standard",
@@ -80,7 +94,6 @@ export default function RequestDetailPage() {
         `/api/v1/service-requests/${requestId}/extract`
       );
       setExtraction(result);
-      // Refresh request data to keep state in sync
       await fetchRequest();
     } catch (err: unknown) {
       setExtractionError("We couldn't understand the request right now.");
@@ -191,9 +204,54 @@ export default function RequestDetailPage() {
             )}
           </div>
         </div>
+
+        {/* Associated Booking Banner if booked */}
+        {associatedBooking && (
+          <div
+            data-testid="request-booking-banner"
+            className="rounded-2xl border border-blue-200 bg-blue-50/70 p-4 sm:p-5 space-y-3"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <CalendarCheck className="h-5 w-5 text-blue-700" />
+                <span className="text-sm font-bold text-slate-900">
+                  Active Booking with {associatedBooking.worker_name || "Assigned Professional"}
+                </span>
+              </div>
+              <span
+                className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider ${
+                  formatBookingStatus(associatedBooking.status).color
+                }`}
+              >
+                {formatBookingStatus(associatedBooking.status).label}
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-700 border-t border-blue-200/60 pt-3">
+              <div>
+                Scheduled Time:{" "}
+                <strong>
+                  {associatedBooking.scheduled_time
+                    ? new Date(associatedBooking.scheduled_time).toLocaleString("en-IN", {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      })
+                    : "Flexible"}
+                </strong>
+              </div>
+              <Link
+                href={`/bookings/${associatedBooking.booking_id}`}
+                className="inline-flex items-center gap-1 font-bold text-blue-700 hover:text-blue-900 transition"
+              >
+                <span>View Booking Details</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* SECTION 2: AI UNDERSTANDING */}
+      {/* SECTION 2: AI UNDERSTANDING & WORKER MATCHING */}
       <div className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-sm space-y-6">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
@@ -284,19 +342,31 @@ export default function RequestDetailPage() {
               <span>Interpreted automatically from customer description</span>
             </div>
 
-            {/* CTA to Match Workers */}
+            {/* CTA to Match Workers (Only show if not booked or want to look up workers) */}
             <div className="pt-4 border-t border-purple-100/80 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
               <p className="text-xs text-slate-600">
-                Skills identified. You can now discover matching nearby trade specialists.
+                {associatedBooking
+                  ? "A trade professional has been requested for this requirement."
+                  : "Skills identified. You can now discover matching nearby trade specialists."}
               </p>
 
-              <Link
-                href={`/requests/${request.id}/matches`}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-6 py-3.5 shadow-md hover:shadow-lg transition"
-              >
-                <Users className="h-4 w-4 text-blue-400" />
-                <span>Find Nearby Workers</span>
-              </Link>
+              {associatedBooking ? (
+                <Link
+                  href={`/bookings/${associatedBooking.booking_id}`}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-6 py-3.5 shadow-md transition"
+                >
+                  <CalendarCheck className="h-4 w-4" />
+                  <span>View Booking</span>
+                </Link>
+              ) : (
+                <Link
+                  href={`/requests/${request.id}/matches`}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-6 py-3.5 shadow-md hover:shadow-lg transition"
+                >
+                  <Users className="h-4 w-4 text-blue-400" />
+                  <span>Find Nearby Workers</span>
+                </Link>
+              )}
             </div>
           </div>
         ) : (

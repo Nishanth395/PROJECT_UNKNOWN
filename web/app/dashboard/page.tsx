@@ -6,15 +6,26 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/providers/auth-provider";
 import { apiClient } from "@/lib/api/api-client";
 import { ServiceRequest, ServiceRequestListResponse } from "@/types/service-request";
+import { BookingListResponse, Booking } from "@/types/booking";
 import { RequestCard } from "@/components/request-card";
 import { LoadingSpinner } from "@/components/loading-spinner";
-import { PlusCircle, ListOrdered, Sparkles, ArrowRight, Wrench, ShieldCheck } from "lucide-react";
+import {
+  PlusCircle,
+  ListOrdered,
+  Sparkles,
+  ArrowRight,
+  Wrench,
+  CalendarCheck,
+  Clock,
+  CheckCircle2,
+} from "lucide-react";
 
 export default function CustomerDashboardPage() {
   const { user, isLoading: isAuthLoading } = useAuth();
   const router = useRouter();
 
   const [recentRequests, setRecentRequests] = useState<ServiceRequest[]>([]);
+  const [bookings, setBookings] = useState<Booking[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   useEffect(() => {
@@ -29,10 +40,13 @@ export default function CustomerDashboardPage() {
     }
 
     if (user) {
-      apiClient
-        .get<ServiceRequestListResponse>("/api/v1/service-requests?limit=6")
-        .then((res) => {
-          setRecentRequests(res.items || []);
+      Promise.all([
+        apiClient.get<ServiceRequestListResponse>("/api/v1/service-requests?limit=6"),
+        apiClient.get<BookingListResponse>("/api/v1/bookings/me?limit=50"),
+      ])
+        .then(([reqRes, bookRes]) => {
+          setRecentRequests(reqRes.items || []);
+          setBookings(bookRes.items || []);
         })
         .catch(() => {})
         .finally(() => setIsLoading(false));
@@ -44,6 +58,10 @@ export default function CustomerDashboardPage() {
   }
 
   const customerName = user?.full_name || user?.email?.split("@")[0] || "Customer";
+
+  const pendingCount = bookings.filter((b) => b.status === "pending").length;
+  const acceptedCount = bookings.filter((b) => b.status === "accepted").length;
+  const completedCount = bookings.filter((b) => b.status === "completed").length;
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
@@ -76,6 +94,64 @@ export default function CustomerDashboardPage() {
           >
             <ListOrdered className="h-4 w-4" />
             <span>My Requests</span>
+          </Link>
+        </div>
+      </div>
+
+      {/* Service Activity & Booking Summary Widget */}
+      <div
+        data-testid="booking-summary-widget"
+        className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-7 shadow-sm space-y-4"
+      >
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div className="flex items-center gap-2">
+            <CalendarCheck className="h-5 w-5 text-blue-600" />
+            <h2 className="text-base font-bold text-slate-900">Your Service Activity</h2>
+          </div>
+          <Link
+            href="/bookings"
+            className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 transition"
+          >
+            <span>View Bookings</span>
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Link
+            href="/bookings?status=pending"
+            className="rounded-2xl bg-amber-50/60 border border-amber-200/60 p-4 transition hover:bg-amber-50 hover:border-amber-300 block space-y-1"
+          >
+            <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-amber-800">
+              <span>Pending</span>
+              <Clock className="h-4 w-4 text-amber-600" />
+            </div>
+            <div className="text-2xl font-black text-amber-950">{pendingCount}</div>
+            <p className="text-[11px] text-amber-700">Awaiting worker response</p>
+          </Link>
+
+          <Link
+            href="/bookings?status=accepted"
+            className="rounded-2xl bg-emerald-50/60 border border-emerald-200/60 p-4 transition hover:bg-emerald-50 hover:border-emerald-300 block space-y-1"
+          >
+            <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-emerald-800">
+              <span>Accepted</span>
+              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+            </div>
+            <div className="text-2xl font-black text-emerald-950">{acceptedCount}</div>
+            <p className="text-[11px] text-emerald-700">Confirmed appointments</p>
+          </Link>
+
+          <Link
+            href="/bookings?status=completed"
+            className="rounded-2xl bg-blue-50/60 border border-blue-200/60 p-4 transition hover:bg-blue-50 hover:border-blue-300 block space-y-1"
+          >
+            <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-blue-800">
+              <span>Completed</span>
+              <CalendarCheck className="h-4 w-4 text-blue-600" />
+            </div>
+            <div className="text-2xl font-black text-blue-950">{completedCount}</div>
+            <p className="text-[11px] text-blue-700">Finished engagements</p>
           </Link>
         </div>
       </div>

@@ -67,6 +67,14 @@ export function Navbar() {
                     My Requests
                   </Link>
                   <Link
+                    href="/bookings"
+                    className={`text-sm font-medium transition-colors hover:text-blue-600 ${
+                      pathname.startsWith("/bookings") ? "text-blue-600 font-semibold" : "text-slate-600"
+                    }`}
+                  >
+                    Bookings
+                  </Link>
+                  <Link
                     href="/request/new"
                     className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-3.5 py-2 shadow-sm transition"
                   >
@@ -193,6 +201,13 @@ export function Navbar() {
                     className="block py-2 text-sm font-medium text-slate-700 hover:text-blue-600"
                   >
                     My Requests
+                  </Link>
+                  <Link
+                    href="/bookings"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="block py-2 text-sm font-medium text-slate-700 hover:text-blue-600"
+                  >
+                    Bookings
                   </Link>
                   <Link
                     href="/request/new"
