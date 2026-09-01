@@ -240,6 +240,44 @@ CREATE TRIGGER trg_recalc_worker_rating
     AFTER INSERT OR UPDATE OR DELETE ON public.reviews
     FOR EACH ROW EXECUTE FUNCTION public.fn_recalculate_worker_rating();
 
+-- 5.4 Trigger function: Automatically sync new Supabase Auth users to public.users
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+DECLARE
+    user_role_val public.user_role;
+    raw_role TEXT;
+BEGIN
+    raw_role := NEW.raw_user_meta_data->>'role';
+    IF raw_role = 'worker' THEN
+        user_role_val := 'worker'::public.user_role;
+    ELSE
+        user_role_val := 'customer'::public.user_role;
+    END IF;
+
+    INSERT INTO public.users (id, email, full_name, role, phone)
+    VALUES (
+        NEW.id,
+        NEW.email,
+        COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.email, 'User'),
+        user_role_val,
+        NEW.raw_user_meta_data->>'phone'
+    )
+    ON CONFLICT (id) DO UPDATE SET
+        email = COALESCE(EXCLUDED.email, public.users.email),
+        full_name = COALESCE(EXCLUDED.full_name, public.users.full_name),
+        role = COALESCE(EXCLUDED.role, public.users.role),
+        phone = COALESCE(EXCLUDED.phone, public.users.phone),
+        updated_at = NOW();
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+    AFTER INSERT OR UPDATE ON auth.users
+    FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
 -- ------------------------------------------------------------------------------
 -- 6. ROW LEVEL SECURITY (RLS) POLICIES (Development Safe: DROP IF EXISTS)
 -- ------------------------------------------------------------------------------
