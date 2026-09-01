@@ -6,9 +6,12 @@ import Link from "next/link";
 import { useAuth } from "@/providers/auth-provider";
 import { apiClient, ApiException } from "@/lib/api/api-client";
 import { BookingListResponse, Booking, BookingStatus } from "@/types/booking";
+import { Review } from "@/types/review";
 import { formatBookingStatus } from "@/lib/utils";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { ErrorAlert } from "@/components/error-alert";
+import { ReviewModal } from "@/components/review-modal";
+import { WorkerReviewsList } from "@/components/worker-reviews-list";
 import {
   ArrowLeft,
   CalendarCheck,
@@ -21,6 +24,7 @@ import {
   CheckCircle2,
   AlertCircle,
   FileText,
+  Sparkles,
 } from "lucide-react";
 
 export default function CustomerBookingDetailPage() {
@@ -33,6 +37,8 @@ export default function CustomerBookingDetailPage() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isCancelling, setIsCancelling] = useState<boolean>(false);
   const [showCancelConfirmation, setShowCancelConfirmation] = useState<boolean>(false);
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState<boolean>(false);
+  const [submittedReview, setSubmittedReview] = useState<Review | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -95,6 +101,12 @@ export default function CustomerBookingDetailPage() {
         setError("Failed to cancel booking.");
       }
     }
+  };
+
+  const handleReviewSuccess = (review: Review) => {
+    setIsReviewModalOpen(false);
+    setSubmittedReview(review);
+    setActionSuccess("Thank you! Your rating and review have been submitted.");
   };
 
   if (isAuthLoading || isLoading) {
@@ -247,6 +259,41 @@ export default function CustomerBookingDetailPage() {
             </div>
           </div>
 
+          {/* Review Action for Completed Bookings */}
+          {booking.status === "completed" && (
+            <div className="rounded-2xl bg-amber-50/60 border border-amber-200 p-5 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-extrabold uppercase tracking-wider text-amber-700 flex items-center gap-1.5">
+                    <Sparkles className="h-4 w-4 text-amber-500" />
+                    <span>Rate Your Experience</span>
+                  </div>
+                  <h3 className="text-sm font-bold text-slate-900 mt-0.5">
+                    How was the service provided by {booking.worker_name || "your worker"}?
+                  </h3>
+                  <p className="text-xs text-slate-600">
+                    Your verified feedback helps maintain quality standards across the trade network.
+                  </p>
+                </div>
+
+                {submittedReview ? (
+                  <div className="flex items-center gap-1.5 bg-emerald-100 border border-emerald-300 text-emerald-800 text-xs font-bold px-3 py-2 rounded-xl">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                    <span>Reviewed ({submittedReview.rating} ★)</span>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setIsReviewModalOpen(true)}
+                    className="inline-flex items-center gap-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2.5 text-xs shadow transition whitespace-nowrap"
+                  >
+                    <Star className="h-4 w-4 fill-slate-950" />
+                    <span>Leave a Review</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Cancellation Action for Pending or Accepted Bookings */}
           {(booking.status === "pending" || booking.status === "accepted") && (
             <div className="border-t border-slate-100 pt-4 space-y-3">
@@ -298,6 +345,24 @@ export default function CustomerBookingDetailPage() {
             </div>
           )}
         </div>
+      )}
+
+      {/* Worker Reviews Catalogue Display */}
+      {booking && (
+        <WorkerReviewsList
+          workerId={booking.worker_id}
+          workerName={booking.worker_name || undefined}
+        />
+      )}
+
+      {/* Review Submission Modal */}
+      {booking && (
+        <ReviewModal
+          booking={booking}
+          isOpen={isReviewModalOpen}
+          onClose={() => setIsReviewModalOpen(false)}
+          onSuccess={handleReviewSuccess}
+        />
       )}
     </div>
   );

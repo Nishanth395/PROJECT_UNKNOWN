@@ -1,6 +1,6 @@
 # Project Unknown Web Client (Next.js App Router)
 
-Full-stack Next.js web application for **Project Unknown** providing an end-to-end customer and worker journey: Supabase Auth, natural-language problem description, browser geolocation & manual coordinates, AI requirement extraction, deterministic PostGIS worker matching, worker job feed, customer booking flow, and worker job execution lifecycle management.
+Full-stack Next.js web application for **Project Unknown** providing an end-to-end customer and worker journey: Supabase Auth, natural-language problem description, browser geolocation & manual coordinates, AI requirement extraction, deterministic PostGIS worker matching, worker job feed, customer booking flow, worker job execution, and verified customer reviews & worker reputation management.
 
 ---
 
@@ -21,7 +21,7 @@ web/
 │   ├── bookings/
 │   │   ├── page.tsx           # Customer bookings list with status filter tabs
 │   │   └── [id]/
-│   │       └── page.tsx       # Customer booking detail & cancellation actions
+│   │       └── page.tsx       # Customer booking detail, cancellation & Rate Worker review actions
 │   ├── request/
 │   │   └── new/
 │   │       └── page.tsx       # Create request with browser GPS & manual coordinates
@@ -54,6 +54,8 @@ web/
 │   ├── navbar.tsx             # Responsive desktop/mobile header navigation (role-aware)
 │   ├── worker-card.tsx        # Ranked worker card with score, distance & Request Booking CTA
 │   ├── active-job-card.tsx    # Active in-progress job card with schedule & details link
+│   ├── review-modal.tsx       # Accessible 1-5 star review modal with comment input
+│   ├── worker-reviews-list.tsx # Authoritative worker reviews catalogue with empty states
 │   ├── job-completion-modal.tsx # Job completion confirmation dialog with PATCH /complete
 │   ├── booking-confirmation-modal.tsx # Booking confirmation dialog with date/time picker
 │   ├── customer-booking-card.tsx # Customer booking card with status badge & scheduled time
@@ -64,7 +66,8 @@ web/
 │   └── error-alert.tsx        # Standardized error component with retry action
 ├── lib/
 │   ├── api/
-│   │   └── api-client.ts      # Centralized API client with JWT injection & error handling
+│   │   ├── api-client.ts      # Centralized API client with JWT injection & error handling
+│   │   └── reviews.ts         # Dedicated review API methods (submitReview, fetchWorkerReviews)
 │   ├── auth/
 │   │   └── supabase-client.ts # Supabase client instance with auto-refreshing sessions
 │   ├── config/
@@ -78,6 +81,7 @@ web/
 │   ├── extraction.ts          # AI extraction result and response types
 │   ├── worker-match.ts        # MatchedWorker and match response types
 │   ├── booking.ts             # Booking, BookingCreateInput, BookingStatus types
+│   ├── review.ts              # Review, ReviewCreateInput, ReviewListResponse types
 │   ├── skill.ts               # Canonical Skill and Category grouped types
 │   └── worker-profile.ts      # Worker profile and onboarding types
 ├── __tests__/
@@ -87,6 +91,7 @@ web/
 │   ├── customer-flow.test.ts  # Customer service request workflow tests
 │   ├── customer-booking-flow.test.ts # Customer booking payload & model tests
 │   ├── customer-booking-components.test.tsx # WorkerCard, CustomerBookingCard, Modal tests
+│   ├── customer-review-flow.test.tsx # ReviewModal, WorkerReviewsList & conflict tests
 │   ├── worker-flow.test.ts    # Worker status transition tests
 │   ├── worker-jobs-flow.test.tsx # ActiveJobCard & JobCompletionModal execution tests
 │   ├── worker-components.test.tsx # Worker UI component tests
@@ -100,26 +105,20 @@ web/
 
 ---
 
-## 🔄 Worker Job Execution Flow (Phase 8C)
+## 🔄 Verified Reviews & Ratings Lifecycle (Phase 8D)
 
 ```text
-Worker Inbound Bookings (/worker/bookings)
+Customer Completed Booking (/bookings/[id])
                   ↓
-         Click "Accept"
+       Click "Leave a Review"
                   ↓
-PATCH /api/v1/bookings/{id}/status (status="accepted")
+Review Modal (1–5 Stars Rating + Optional Feedback)
                   ↓
-Active Jobs (/worker/jobs & /worker/dashboard)
+POST /api/v1/reviews
                   ↓
-Worker Job Details (/worker/jobs/[id])
+PostgreSQL Trigger (fn_recalculate_worker_rating)
                   ↓
-        Click "Complete Job"
-                  ↓
-Job Completion Modal (Confirmation)
-                  ↓
-PATCH /api/v1/bookings/{id}/complete
-                  ↓
-Authoritative State Re-fetched from Backend -> status="completed"
+Authoritative Worker Reviews Catalogue (/api/v1/reviews/worker/{worker_id})
 ```
 
 ---
@@ -139,7 +138,7 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 ## 🧪 Testing, Linting & Build
 
 ```bash
-# Run Vitest test suite (50 tests)
+# Run Vitest test suite (56 tests)
 npm test
 
 # Run ESLint validation (0 errors, 0 warnings)
