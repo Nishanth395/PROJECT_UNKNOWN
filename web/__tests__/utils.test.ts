@@ -39,9 +39,12 @@ describe("Utility Functions", () => {
 
   describe("formatStatus", () => {
     it("formats service request statuses correctly", () => {
-      expect(formatStatus("pending").label).toBe("Pending Analysis");
+      expect(formatStatus("open").label).toBe("Open");
+      expect(formatStatus("pending").label).toBe("Open");
       expect(formatStatus("matched").label).toBe("Workers Matched");
+      expect(formatStatus("booked").label).toBe("Booked");
       expect(formatStatus("completed").label).toBe("Completed");
+      expect(formatStatus("cancelled").label).toBe("Cancelled");
     });
   });
 });
