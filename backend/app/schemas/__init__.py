@@ -15,6 +15,14 @@ from app.schemas.service_request import (
 )
 from app.schemas.ai import ServiceRequirementExtraction, ExtractionResponse, ExtractionUrgency
 from app.schemas.matching import MatchedWorkerItem, WorkerMatchResponse
+from app.schemas.worker_feed import WorkerFeedItem, WorkerFeedResponse
+from app.schemas.booking import (
+    BookingStatus,
+    BookingCreate,
+    BookingStatusUpdate,
+    BookingResponse,
+    BookingListResponse,
+)
 
 __all__ = [
     "HealthResponse",
@@ -40,4 +48,11 @@ __all__ = [
     "ExtractionUrgency",
     "MatchedWorkerItem",
     "WorkerMatchResponse",
+    "WorkerFeedItem",
+    "WorkerFeedResponse",
+    "BookingStatus",
+    "BookingCreate",
+    "BookingStatusUpdate",
+    "BookingResponse",
+    "BookingListResponse",
 ]

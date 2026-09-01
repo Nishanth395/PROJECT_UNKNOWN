@@ -6,6 +6,8 @@ from app.db.database import get_db
 from app.db.models import User
 from app.core.security import require_worker
 from app.services.worker_service import WorkerService
+from app.services.worker_feed_service import WorkerFeedService
+from app.schemas.worker_feed import WorkerFeedResponse
 from app.schemas.worker import (
     WorkerListResponse,
     WorkerDetail,
@@ -100,6 +102,26 @@ def update_my_worker_skills(
     db: Session = Depends(get_db),
 ) -> WorkerSkillsResponse:
     return WorkerService.update_worker_skills(db=db, user=current_worker, data=data)
+
+
+@router.get(
+    "/me/feed",
+    response_model=WorkerFeedResponse,
+    summary="Get Worker Service Request Feed",
+    description="Retrieves nearby active service requests matching the worker's skills, category, and operating service radius.",
+)
+def get_my_worker_feed(
+    limit: int = Query(20, ge=1, le=50, description="Maximum number of requests to return"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    current_worker: User = Depends(require_worker),
+    db: Session = Depends(get_db),
+) -> WorkerFeedResponse:
+    return WorkerFeedService.get_worker_feed(
+        db=db,
+        user=current_worker,
+        limit=limit,
+        offset=offset,
+    )
 
 
 # ==============================================================================
