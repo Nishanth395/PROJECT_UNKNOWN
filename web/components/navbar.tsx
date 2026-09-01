@@ -4,7 +4,17 @@ import React, { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/providers/auth-provider";
-import { Wrench, LogOut, Menu, X, User as UserIcon, PlusCircle } from "lucide-react";
+import {
+  Wrench,
+  LogOut,
+  Menu,
+  X,
+  User as UserIcon,
+  PlusCircle,
+  Briefcase,
+  Layers,
+  CalendarCheck,
+} from "lucide-react";
 
 export function Navbar() {
   const { user, signOut, isLoading } = useAuth();
@@ -24,7 +34,10 @@ export function Navbar() {
     <header className="sticky top-0 z-50 w-full border-b border-slate-200 bg-white/95 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* Brand */}
-        <Link href={user ? (isWorker ? "/worker/dashboard" : "/dashboard") : "/"} className="flex items-center gap-2.5 font-bold text-slate-900 text-lg">
+        <Link
+          href={user ? (isWorker ? "/worker/dashboard" : "/dashboard") : "/"}
+          className="flex items-center gap-2.5 font-bold text-slate-900 text-lg"
+        >
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 text-white shadow-sm">
             <Wrench className="h-5 w-5 text-blue-400" />
           </div>
@@ -64,14 +77,47 @@ export function Navbar() {
               )}
 
               {isWorker && (
-                <Link
-                  href="/worker/dashboard"
-                  className={`text-sm font-medium transition-colors hover:text-blue-600 ${
-                    pathname.startsWith("/worker") ? "text-blue-600 font-semibold" : "text-slate-600"
-                  }`}
-                >
-                  Worker Dashboard
-                </Link>
+                <>
+                  <Link
+                    href="/worker/dashboard"
+                    className={`text-sm font-medium transition-colors hover:text-blue-600 ${
+                      pathname === "/worker/dashboard" ? "text-blue-600 font-semibold" : "text-slate-600"
+                    }`}
+                  >
+                    Home
+                  </Link>
+                  <Link
+                    href="/worker/feed"
+                    className={`text-sm font-medium transition-colors hover:text-blue-600 ${
+                      pathname.startsWith("/worker/feed") ? "text-blue-600 font-semibold" : "text-slate-600"
+                    }`}
+                  >
+                    Job Feed
+                  </Link>
+                  <Link
+                    href="/worker/bookings"
+                    className={`text-sm font-medium transition-colors hover:text-blue-600 ${
+                      pathname.startsWith("/worker/bookings") ? "text-blue-600 font-semibold" : "text-slate-600"
+                    }`}
+                  >
+                    Bookings
+                  </Link>
+                  <Link
+                    href="/worker/skills"
+                    className={`text-sm font-medium transition-colors hover:text-blue-600 ${
+                      pathname === "/worker/skills" ? "text-blue-600 font-semibold" : "text-slate-600"
+                    }`}
+                  >
+                    Skills
+                  </Link>
+                  <Link
+                    href="/worker/feed"
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-3.5 py-2 shadow-sm transition"
+                  >
+                    <Briefcase className="h-3.5 w-3.5" />
+                    <span>View Job Feed</span>
+                  </Link>
+                </>
               )}
 
               <div className="flex items-center gap-3 pl-3 border-l border-slate-200">
@@ -158,13 +204,43 @@ export function Navbar() {
                 </>
               )}
               {isWorker && (
-                <Link
-                  href="/worker/dashboard"
-                  onClick={() => setIsMobileMenuOpen(false)}
-                  className="block py-2 text-sm font-medium text-slate-700 hover:text-blue-600"
-                >
-                  Worker Dashboard
-                </Link>
+                <>
+                  <Link
+                    href="/worker/dashboard"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="block py-2 text-sm font-medium text-slate-700 hover:text-blue-600"
+                  >
+                    Home
+                  </Link>
+                  <Link
+                    href="/worker/feed"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="block py-2 text-sm font-medium text-slate-700 hover:text-blue-600"
+                  >
+                    Job Feed
+                  </Link>
+                  <Link
+                    href="/worker/bookings"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="block py-2 text-sm font-medium text-slate-700 hover:text-blue-600"
+                  >
+                    Bookings
+                  </Link>
+                  <Link
+                    href="/worker/skills"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="block py-2 text-sm font-medium text-slate-700 hover:text-blue-600"
+                  >
+                    Skills
+                  </Link>
+                  <Link
+                    href="/worker/feed"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="block py-2.5 text-center text-sm font-bold text-white bg-blue-600 rounded-xl"
+                  >
+                    View Job Feed
+                  </Link>
+                </>
               )}
               <button
                 onClick={() => {

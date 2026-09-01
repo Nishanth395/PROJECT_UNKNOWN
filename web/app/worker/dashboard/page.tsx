@@ -1,74 +1,71 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/providers/auth-provider";
 import { apiClient, ApiException } from "@/lib/api/api-client";
+import { WorkerProfile, WorkerProfileUpdateInput } from "@/types/worker-profile";
+import { WorkerFeedResponse } from "@/types/worker-feed";
+import { BookingListResponse } from "@/types/booking";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { ErrorAlert } from "@/components/error-alert";
+import { JobFeedCard } from "@/components/job-feed-card";
+import { WorkerBookingCard } from "@/components/worker-booking-card";
 import {
-  Briefcase,
   Star,
   ShieldCheck,
   MapPin,
+  Briefcase,
+  Layers,
+  CalendarCheck,
   Clock,
-  CheckCircle2,
-  Inbox,
-  Sparkles,
+  ArrowRight,
+  RefreshCw,
+  Loader2,
 } from "lucide-react";
-
-interface WorkerProfileData {
-  worker_id: string;
-  user_id: string;
-  full_name: string;
-  email: string | null;
-  phone: string | null;
-  bio: string | null;
-  experience_years: number;
-  service_radius_km: number;
-  latitude: number | null;
-  longitude: number | null;
-  is_available: boolean;
-  is_verified: boolean;
-  rating: number;
-  total_reviews: number;
-  skills: Array<{
-    skill_id: string;
-    skill_name: string;
-    category: string;
-    experience_years?: number;
-  }>;
-}
 
 export default function WorkerDashboardPage() {
   const { user, isLoading: isAuthLoading } = useAuth();
   const router = useRouter();
 
-  const [profile, setProfile] = useState<WorkerProfileData | null>(null);
+  const [profile, setProfile] = useState<WorkerProfile | null>(null);
+  const [feed, setFeed] = useState<WorkerFeedResponse | null>(null);
+  const [pendingBookings, setPendingBookings] = useState<BookingListResponse | null>(null);
+  const [confirmedBookings, setConfirmedBookings] = useState<BookingListResponse | null>(null);
+
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [isToggling, setIsToggling] = useState<boolean>(false);
+  const [isTogglingAvailability, setIsTogglingAvailability] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchProfile = useCallback(async () => {
-    setIsLoading(true);
+  const loadWorkerData = useCallback(async () => {
     setError(null);
     try {
-      const data = await apiClient.get<WorkerProfileData>("/api/v1/workers/me");
-      setProfile(data);
-    } catch (err: unknown) {
-      if (err instanceof ApiException) {
-        if (err.statusCode === 404) {
-          setError("Worker profile not created yet. Please complete worker setup.");
-        } else {
-          setError(err.message);
-        }
-      } else {
-        setError("Failed to load worker profile.");
-      }
-    } finally {
+      const profileData = await apiClient.get<WorkerProfile>("/api/v1/workers/me");
+      setProfile(profileData);
+
+      // Fetch feed and bookings in parallel
+      const [feedData, pendingData, confirmedData] = await Promise.all([
+        apiClient.get<WorkerFeedResponse>("/api/v1/workers/me/feed?limit=4"),
+        apiClient.get<BookingListResponse>("/api/v1/bookings/me?status=pending&limit=3"),
+        apiClient.get<BookingListResponse>("/api/v1/bookings/me?status=accepted&limit=3"),
+      ]);
+
+      setFeed(feedData);
+      setPendingBookings(pendingData);
+      setConfirmedBookings(confirmedData);
       setIsLoading(false);
+    } catch (err: unknown) {
+      setIsLoading(false);
+      if (err instanceof ApiException && err.statusCode === 404) {
+        router.push("/worker/onboarding");
+      } else if (err instanceof ApiException) {
+        setError(err.message);
+      } else {
+        setError("Failed to load worker dashboard data.");
+      }
     }
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (!isAuthLoading && !user) {
@@ -80,153 +77,244 @@ export default function WorkerDashboardPage() {
       return;
     }
     if (user) {
-      fetchProfile();
+      loadWorkerData();
     }
-  }, [user, isAuthLoading, router, fetchProfile]);
+  }, [user, isAuthLoading, router, loadWorkerData]);
 
-  const toggleAvailability = async () => {
-    if (!profile) return;
-    setIsToggling(true);
+  const handleToggleAvailability = async () => {
+    if (!profile || isTogglingAvailability) return;
+    setIsTogglingAvailability(true);
+    setError(null);
+
+    const nextState = !profile.is_available;
     try {
-      const updated = await apiClient.patch<WorkerProfileData>("/api/v1/workers/me", {
-        is_available: !profile.is_available,
+      const updated = await apiClient.patch<WorkerProfile>("/api/v1/workers/me", {
+        is_available: nextState,
       });
       setProfile(updated);
-    } catch (err: any) {
-      setError(err.message || "Failed to update availability");
-    } finally {
-      setIsToggling(false);
+
+      // Refresh feed based on new availability
+      const feedData = await apiClient.get<WorkerFeedResponse>("/api/v1/workers/me/feed?limit=4");
+      setFeed(feedData);
+      setIsTogglingAvailability(false);
+    } catch (err: unknown) {
+      setIsTogglingAvailability(false);
+      if (err instanceof ApiException) {
+        setError(err.message);
+      } else {
+        setError("Failed to update availability toggle.");
+      }
     }
   };
 
-  if (isAuthLoading || (isLoading && !profile)) {
+  if (isAuthLoading || isLoading) {
     return <LoadingSpinner message="Loading worker dashboard..." />;
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8 space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
-            Worker Dashboard
-          </h1>
-          <p className="text-sm text-slate-600">
-            Manage your trade availability, operating radius, and assigned skills.
-          </p>
-        </div>
-
-        {profile && (
-          <button
-            onClick={toggleAvailability}
-            disabled={isToggling}
-            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition shadow-sm ${
-              profile.is_available
-                ? "bg-emerald-600 hover:bg-emerald-500 text-white"
-                : "bg-slate-200 hover:bg-slate-300 text-slate-700"
-            }`}
-          >
-            <div
-              className={`h-2.5 w-2.5 rounded-full ${
-                profile.is_available ? "bg-white animate-pulse" : "bg-slate-400"
-              }`}
-            />
-            <span>{profile.is_available ? "Online (Available for Jobs)" : "Offline (Unavailable)"}</span>
-          </button>
-        )}
-      </div>
-
-      {error && <ErrorAlert message={error} onRetry={fetchProfile} />}
-
-      {profile && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Profile Overview Card */}
-          <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-6">
-            <div className="flex items-start justify-between">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-xl font-bold text-slate-900">{profile.full_name}</h2>
-                  {profile.is_verified && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">
-                      <ShieldCheck className="h-3.5 w-3.5" />
-                      Verified
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-slate-500">{profile.email || "No email"}</p>
-              </div>
-
-              <div className="flex items-center gap-1 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg text-amber-700 font-bold text-sm">
-                <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
-                <span>{profile.rating > 0 ? profile.rating.toFixed(2) : "New"}</span>
-                <span className="text-xs font-normal text-amber-600">({profile.total_reviews})</span>
-              </div>
+    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
+      {/* Hero / Overview Card */}
+      <div className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-sm space-y-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Worker Hub
+              </span>
+              {profile?.is_verified && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-800 border border-emerald-200">
+                  <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+                  Verified Pro
+                </span>
+              )}
             </div>
 
-            {profile.bio && (
-              <div className="space-y-1">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Bio</span>
-                <p className="text-sm text-slate-700 leading-relaxed">{profile.bio}</p>
-              </div>
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+              {profile?.full_name || user?.full_name || "Worker Dashboard"}
+            </h1>
+
+            {profile?.bio && (
+              <p className="text-sm text-slate-600 max-w-2xl">{profile.bio}</p>
             )}
 
-            {/* Skills */}
-            <div className="space-y-2 border-t border-slate-100 pt-4">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                Assigned Trade Skills ({profile.skills.length})
-              </span>
-              <div className="flex flex-wrap gap-2">
-                {profile.skills.map((s) => (
-                  <span
-                    key={s.skill_id}
-                    className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-3 py-1 text-xs font-medium text-slate-800"
-                  >
-                    <CheckCircle2 className="h-3 w-3 text-emerald-600" />
-                    {s.skill_name} ({s.category})
-                  </span>
-                ))}
+            {/* Profile Meta Info */}
+            <div className="flex flex-wrap items-center gap-4 text-xs text-slate-600 pt-1">
+              <div className="flex items-center gap-1 font-semibold text-slate-900">
+                <Star className="h-4 w-4 text-amber-500 fill-amber-500" />
+                <span>{profile?.rating ? profile.rating.toFixed(2) : "New"}</span>
+                <span className="text-slate-400 font-normal">
+                  ({profile?.total_reviews || 0} reviews)
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <Briefcase className="h-4 w-4 text-slate-400" />
+                <span>{profile?.experience_years} years experience</span>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <MapPin className="h-4 w-4 text-slate-400" />
+                <span>{profile?.service_radius_km} km radius</span>
+                {profile?.address_text && (
+                  <span className="text-slate-400">({profile.address_text})</span>
+                )}
               </div>
             </div>
           </div>
 
-          {/* Operational Metrics */}
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-3">
-              <div className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                Operating Parameters
-              </div>
+          {/* Availability Toggle */}
+          <div className="flex flex-col items-start md:items-end gap-2 rounded-2xl bg-slate-50 p-4 border border-slate-200/80">
+            <div className="text-xs font-bold text-slate-500">Live Dispatch Status</div>
+            <button
+              onClick={handleToggleAvailability}
+              disabled={isTogglingAvailability}
+              className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-xs font-bold transition shadow-sm ${
+                profile?.is_available
+                  ? "bg-emerald-600 text-white hover:bg-emerald-500"
+                  : "bg-slate-300 text-slate-800 hover:bg-slate-400"
+              } disabled:opacity-50`}
+            >
+              {isTogglingAvailability ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>Updating...</span>
+                </>
+              ) : (
+                <span>{profile?.is_available ? "🟢 Online" : "⚪ Offline"}</span>
+              )}
+            </button>
+            <span className="text-[11px] text-slate-500 max-w-[200px] text-left md:text-right">
+              Online workers can receive nearby job requests.
+            </span>
+          </div>
+        </div>
+      </div>
 
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between py-1 border-b border-slate-100">
-                  <span className="text-slate-500">Experience</span>
-                  <span className="font-bold text-slate-900">{profile.experience_years} years</span>
-                </div>
+      {error && <ErrorAlert message={error} />}
 
-                <div className="flex justify-between py-1 border-b border-slate-100">
-                  <span className="text-slate-500">Service Radius</span>
-                  <span className="font-bold text-slate-900">{profile.service_radius_km} km</span>
-                </div>
+      {/* Metrics Row */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Link
+          href="/worker/feed"
+          className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-300 hover:shadow-md space-y-1 block"
+        >
+          <div className="flex items-center justify-between text-slate-500">
+            <span className="text-xs font-bold uppercase tracking-wider">Nearby Active Jobs</span>
+            <Briefcase className="h-4 w-4 text-blue-600" />
+          </div>
+          <div className="text-3xl font-extrabold text-slate-900">
+            {feed?.total_requests ?? 0}
+          </div>
+          <p className="text-xs text-slate-500">Matching your skills & radius</p>
+        </Link>
 
-                <div className="flex justify-between py-1">
-                  <span className="text-slate-500">Coordinates</span>
-                  <span className="font-bold text-slate-900 text-xs">
-                    {profile.latitude?.toFixed(4)}, {profile.longitude?.toFixed(4)}
-                  </span>
-                </div>
-              </div>
+        <Link
+          href="/worker/bookings?status=pending"
+          className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-amber-300 hover:shadow-md space-y-1 block"
+        >
+          <div className="flex items-center justify-between text-slate-500">
+            <span className="text-xs font-bold uppercase tracking-wider">Pending Bookings</span>
+            <Clock className="h-4 w-4 text-amber-600" />
+          </div>
+          <div className="text-3xl font-extrabold text-slate-900">
+            {pendingBookings?.total ?? 0}
+          </div>
+          <p className="text-xs text-slate-500">Awaiting your acceptance</p>
+        </Link>
+
+        <Link
+          href="/worker/skills"
+          className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-purple-300 hover:shadow-md space-y-1 block"
+        >
+          <div className="flex items-center justify-between text-slate-500">
+            <span className="text-xs font-bold uppercase tracking-wider">Active Trade Skills</span>
+            <Layers className="h-4 w-4 text-purple-600" />
+          </div>
+          <div className="text-3xl font-extrabold text-slate-900">
+            {profile?.skills?.length ?? 0}
+          </div>
+          <p className="text-xs text-slate-500">Configured canonical skills</p>
+        </Link>
+      </div>
+
+      {/* Pending Bookings Section (Action Needed) */}
+      {pendingBookings && pendingBookings.items.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+            <div className="flex items-center gap-2">
+              <Clock className="h-5 w-5 text-amber-600" />
+              <h2 className="text-lg font-bold text-slate-900">
+                Action Required: Pending Bookings ({pendingBookings.total})
+              </h2>
             </div>
+            <Link
+              href="/worker/bookings?status=pending"
+              className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1"
+            >
+              <span>View All</span>
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
 
-            {/* Service Requests Card */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm text-center space-y-2">
-              <Inbox className="mx-auto h-8 w-8 text-slate-400" />
-              <h3 className="text-sm font-bold text-slate-900">No service requests yet</h3>
-              <p className="text-xs text-slate-500">
-                Incoming customer job assignments will appear here in the next phase.
-              </p>
-            </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {pendingBookings.items.map((booking) => (
+              <WorkerBookingCard key={booking.booking_id} booking={booking} />
+            ))}
           </div>
         </div>
       )}
+
+      {/* Live Nearby Job Feed Preview */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+          <div className="flex items-center gap-2">
+            <Briefcase className="h-5 w-5 text-blue-600" />
+            <h2 className="text-lg font-bold text-slate-900">
+              Nearby Job Requests ({feed?.total_requests ?? 0})
+            </h2>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={loadWorkerData}
+              className="text-xs font-semibold text-slate-600 hover:text-slate-900 flex items-center gap-1"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              <span>Refresh</span>
+            </button>
+            <Link
+              href="/worker/feed"
+              className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1"
+            >
+              <span>Explore Feed</span>
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+        </div>
+
+        {feed && feed.requests.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {feed.requests.map((item) => (
+              <JobFeedCard key={item.request_id} item={item} />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center space-y-3">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+              <Briefcase className="h-6 w-6" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-base font-bold text-slate-900">
+                No suitable jobs nearby right now
+              </h3>
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                {profile?.is_available
+                  ? "When new customers describe problems matching your trade skills within your radius, they will automatically appear here."
+                  : "You are currently offline. Toggle your status to Online above to receive active customer requests."}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
