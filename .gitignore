@@ -10,15 +10,27 @@
 *.key
 *.cert
 
+# Node.js & Next.js Web
+node_modules/
+.next/
+out/
+build/
+dist/
+coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.turbo/
+web/.env.local
+web/.env.*.local
+
 # Python & FastAPI
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-build/
 develop-eggs/
-dist/
 downloads/
 eggs/
 .eggs/
@@ -59,6 +71,7 @@ mobile/.flutter-plugins
 mobile/.flutter-plugins-dependencies
 *.lock
 !pubspec.lock
+!package-lock.json
 
 # Android Build Outputs
 **/android/.gradle/
