@@ -13,6 +13,7 @@ import { ErrorAlert } from "@/components/error-alert";
 import { JobFeedCard } from "@/components/job-feed-card";
 import { WorkerBookingCard } from "@/components/worker-booking-card";
 import { ActiveJobCard } from "@/components/active-job-card";
+import { WorkerReviews } from "@/components/worker-reviews";
 import {
   Star,
   ShieldCheck,
@@ -358,6 +359,16 @@ export default function WorkerDashboardPage() {
           </div>
         )}
       </div>
+
+      {/* Worker Reputation & Reviews Catalogue */}
+      {profile && (
+        <div className="space-y-4">
+          <WorkerReviews
+            workerId={profile.worker_id}
+            workerName={profile.full_name || user?.full_name || "Your Profile"}
+          />
+        </div>
+      )}
     </div>
   );
 }

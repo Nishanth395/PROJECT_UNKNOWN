@@ -5,13 +5,14 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/providers/auth-provider";
 import { apiClient, ApiException } from "@/lib/api/api-client";
+import { fetchWorkerReviews } from "@/lib/api/reviews";
 import { BookingListResponse, Booking, BookingStatus } from "@/types/booking";
 import { Review } from "@/types/review";
 import { formatBookingStatus } from "@/lib/utils";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { ErrorAlert } from "@/components/error-alert";
 import { ReviewModal } from "@/components/review-modal";
-import { WorkerReviewsList } from "@/components/worker-reviews-list";
+import { WorkerReviews } from "@/components/worker-reviews";
 import {
   ArrowLeft,
   CalendarCheck,
@@ -50,6 +51,18 @@ export default function CustomerBookingDetailPage() {
         setError("Booking not found or not owned by your account.");
       } else {
         setBooking(found);
+        // If booking is completed, check if it was already reviewed
+        if (found.status === "completed") {
+          try {
+            const reviews = await fetchWorkerReviews(found.worker_id);
+            const existing = reviews.items.find((r) => r.booking_id === bookingId);
+            if (existing) {
+              setSubmittedReview(existing);
+            }
+          } catch {
+            // Non-blocking fallback
+          }
+        }
       }
       setIsLoading(false);
     } catch (err: unknown) {
@@ -107,6 +120,8 @@ export default function CustomerBookingDetailPage() {
     setIsReviewModalOpen(false);
     setSubmittedReview(review);
     setActionSuccess("Thank you! Your rating and review have been submitted.");
+    // Re-fetch booking and reviews
+    fetchBooking();
   };
 
   if (isAuthLoading || isLoading) {
@@ -261,7 +276,10 @@ export default function CustomerBookingDetailPage() {
 
           {/* Review Action for Completed Bookings */}
           {booking.status === "completed" && (
-            <div className="rounded-2xl bg-amber-50/60 border border-amber-200 p-5 space-y-3">
+            <div
+              data-testid="review-action-section"
+              className="rounded-2xl bg-amber-50/60 border border-amber-200 p-5 space-y-3"
+            >
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <div className="text-xs font-extrabold uppercase tracking-wider text-amber-700 flex items-center gap-1.5">
@@ -277,17 +295,21 @@ export default function CustomerBookingDetailPage() {
                 </div>
 
                 {submittedReview ? (
-                  <div className="flex items-center gap-1.5 bg-emerald-100 border border-emerald-300 text-emerald-800 text-xs font-bold px-3 py-2 rounded-xl">
+                  <div
+                    data-testid="review-submitted-badge"
+                    className="flex items-center gap-1.5 bg-emerald-100 border border-emerald-300 text-emerald-800 text-xs font-bold px-3 py-2 rounded-xl"
+                  >
                     <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                    <span>Reviewed ({submittedReview.rating} ★)</span>
+                    <span>Review submitted ({submittedReview.rating} ★)</span>
                   </div>
                 ) : (
                   <button
+                    data-testid="rate-worker-btn"
                     onClick={() => setIsReviewModalOpen(true)}
                     className="inline-flex items-center gap-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2.5 text-xs shadow transition whitespace-nowrap"
                   >
                     <Star className="h-4 w-4 fill-slate-950" />
-                    <span>Leave a Review</span>
+                    <span>Rate Worker</span>
                   </button>
                 )}
               </div>
@@ -349,7 +371,7 @@ export default function CustomerBookingDetailPage() {
 
       {/* Worker Reviews Catalogue Display */}
       {booking && (
-        <WorkerReviewsList
+        <WorkerReviews
           workerId={booking.worker_id}
           workerName={booking.worker_name || undefined}
         />

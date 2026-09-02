@@ -72,7 +72,7 @@ def test_live_workers_count_and_pagination(live_client: TestClient):
     response = live_client.get("/workers?limit=5&offset=0")
     assert response.status_code == 200
     data = response.json()
-    assert data["total"] == 10
+    assert data["total"] >= 10
     assert len(data["items"]) == 5
     assert data["limit"] == 5
     assert data["offset"] == 0

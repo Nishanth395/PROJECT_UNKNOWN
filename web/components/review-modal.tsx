@@ -66,10 +66,10 @@ export function ReviewModal({
     } catch (err: unknown) {
       setIsSubmitting(false);
       if (err instanceof ApiException) {
-        if (err.errorCode === "DUPLICATE_REVIEW" || err.statusCode === 409) {
-          setError("A review has already been submitted for this completed booking.");
-        } else if (err.errorCode === "BOOKING_NOT_COMPLETED") {
+        if (err.errorCode === "BOOKING_NOT_COMPLETED") {
           setError("Reviews can only be submitted for completed bookings.");
+        } else if (err.errorCode === "DUPLICATE_REVIEW" || err.statusCode === 409) {
+          setError("A review has already been submitted for this completed booking.");
         } else {
           setError(err.message);
         }
